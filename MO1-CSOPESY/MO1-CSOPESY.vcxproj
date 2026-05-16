@@ -42,13 +42,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -139,7 +139,27 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="MO1-CSOPESY.cpp" />
+    <ClCompile Include="ConfigParser.cpp" />
+    <ClCompile Include="EventBroadcaster.cpp" />
+    <ClCompile Include="GlobalConfig.cpp" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="MainMenu.cpp" />
+    <ClCompile Include="Process.cpp" />
+    <ClCompile Include="ProcessScreen.cpp" />
+    <ClCompile Include="Scheduler.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ConfigParser.h" />
+    <ClInclude Include="EventBroadcaster.h" />
+    <ClInclude Include="GlobalConfig.h" />
+    <ClInclude Include="MainMenu.h" />
+    <ClInclude Include="Process.h" />
+    <ClInclude Include="ProcessScreen.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="Scheduler.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="MO1-CSOPESY.rc" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="config.txt" />
