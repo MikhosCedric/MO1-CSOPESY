@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <cstdlib>
 
 MainMenu::MainMenu() {
     isInitialized = false;
@@ -56,6 +57,10 @@ void MainMenu::handleCommand(const std::string& commandLine) {
     // 1. Initialization Command
     if (command == "initialize") {
         handleInitialize();
+    }
+    // Clear command
+    else if (command == "clear") {
+        clearScreen();
     }
     // THE INITIALIZATION LOCK: Block all other commands if not initialized
     else if (!isInitialized) {
@@ -126,4 +131,13 @@ void MainMenu::handleScreen(const std::vector<std::string>& args) {
 
 void MainMenu::handleReportUtil() {
     std::cout << "Generating report-util... (Pair B will use std::ofstream to build csopesy-log.txt here)\n";
+}
+
+void MainMenu::clearScreen() {
+#ifdef _WIN32
+    std::system("cls");
+#else
+    std::system("clear");
+#endif
+    printHeader();
 }
