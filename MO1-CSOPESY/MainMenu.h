@@ -20,6 +20,7 @@ private:
 
     // UI Helpers
     void printHeader();
+	void clearScreen();
     void handleCommand(const std::string& commandLine);
 
     // Command Handlers
