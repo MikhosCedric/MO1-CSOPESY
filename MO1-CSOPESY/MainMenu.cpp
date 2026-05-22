@@ -5,16 +5,41 @@
 #include <iostream>
 #include <sstream>
 #include <cstdlib>
+#include <string>
+#include <vector>
+#include <windows.h>
 
 MainMenu::MainMenu() {
     isInitialized = false;
 }
 
+// Function to set the color of the console text
+void setColor(int color) {
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole, color);
+    /*
+        10	Light Green
+        14	Yellow
+        7	White
+    */
+}
+
 void MainMenu::printHeader() {
-    std::cout << "\n===================================================\n";
-    std::cout << "                 CSOPESY                        \n";
-    std::cout << "===================================================\n";
-    std::cout << "Welcome to CSOPESY Emulator!\n\n";
+    std::cout << "______________________________________________________" << std::endl;
+    std::cout << "  ____ ____   ___  ____  _____ ______   __" << std::endl;
+    std::cout << " / ___/ ___| / _ \\|  _ \\| ____/ ___\\ \\ / /" << std::endl;
+    std::cout << "| |   \\___ \\| | | | |_) |  _| \\___ \\\\ V / " << std::endl;
+    std::cout << "| |___ ___) | |_| |  __/| |___ ___) || |  " << std::endl;
+    std::cout << " \\____|____/ \\___/|_|   |_____|____/ |_|  " << std::endl;
+    std::cout << "______________________________________________________" << std::endl;
+    setColor(10); // Green
+    std::cout << "Hello, Welcome to CSOPESY commandline!" << std::endl;
+    setColor(14); // Yellow
+    std::cout << "Type 'exit' to quit, 'clear' to clear the screen" << std::endl;
+    std::cout << std::endl;
+    std::cout << "** IMPORTANT: Type 'initialize' to load config and start system **" << std::endl;
+    std::cout << std::endl;
+    setColor(7); // Back to white
 }
 
 void MainMenu::run() {
@@ -23,7 +48,7 @@ void MainMenu::run() {
 
     // The Master Input Loop
     while (true) {
-        std::cout << "root:\\> ";
+        std::cout << "Enter a command: ";
         std::getline(std::cin, input);
 
         // Ignore empty 'Enter' presses
@@ -33,7 +58,7 @@ void MainMenu::run() {
 
         // The exit command works regardless of initialization
         if (input == "exit") {
-            std::cout << "Terminating CSOPESY Emulator. Goodbye!\n";
+            //std::cout << "Terminating CSOPESY Emulator. Goodbye!\n";
             break; // Breaks the while loop and closes the program
         }
 
@@ -58,32 +83,25 @@ void MainMenu::handleCommand(const std::string& commandLine) {
     if (command == "initialize") {
         handleInitialize();
     }
+
     // Clear command
-    else if (command == "clear") {
+    if (command == "clear") {
         clearScreen();
     }
     // THE INITIALIZATION LOCK: Block all other commands if not initialized
     else if (!isInitialized) {
         std::cout << "Error: You must run 'initialize' before using any other commands.\n";
+        std::cout << std::endl;
     }
-    // 2. Screen Commands (Multiplexer)
-    else if (command == "screen") {
-        handleScreen(args);
-    }
-    // 3. Scheduler Commands (Dummy generation)
-    else if (command == "scheduler-start" || command == "scheduler-test") {
-        std::cout << "Starting scheduler dummy generation... (To be connected to CPU module)\n";
-    }
-    else if (command == "scheduler-stop") {
-        std::cout << "Stopping scheduler dummy generation... (To be connected to CPU module)\n";
-    }
-    // 4. Report Utility
-    else if (command == "report-util") {
-        handleReportUtil();
+    else if (command == "initialize" || command == "screen" ||
+        command == "scheduler-start" || command == "scheduler-stop" || command == "report-util") {
+        std::cout << "'" << command << "' command recognized. Doing something." << std::endl;
+        std::cout << std::endl;
     }
     // Unknown Command Fallback
     else {
         std::cout << "Command not recognized: " << command << "\n";
+        std::cout << std::endl;
     }
 }
 
@@ -93,12 +111,12 @@ void MainMenu::handleInitialize() {
         return;
     }
 
-    std::cout << "Initializing system...\n";
+    //std::cout << "Initializing system...\n";
 
     // Call Pair B's FileSystem ConfigParser
     if (ConfigParser::loadConfig("config.txt")) {
         isInitialized = true;
-        std::cout << "Initialization complete. All systems go!\n";
+        //std::cout << "Initialization complete. All systems go!\n";
     }
     else {
         std::cout << "Failed to initialize. Please check if config.txt exists.\n";
