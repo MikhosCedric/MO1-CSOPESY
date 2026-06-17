@@ -1,16 +1,55 @@
 #include "Process.h"
+#include "EventBroadcaster.h"
+#include "Utils.h"
 
-// When a new process is created, initialize it with safe default values
 Process::Process(int processID, const std::string& processName) {
     id = processID;
     name = processName;
 
-    // Pair B's external defaults
     state = ProcessState::READY;
-    assignedCore = -1; // -1 means it is waiting in the queue and doesn't have a core yet
+    assignedCore = -1;
     cpuTicksUsed = 0;
 
-    // Pair A's internal defaults
     currentLine = 0;
-    totalLines = 0; // We will generate the actual dummy instructions later!
+    totalLines = 0;
+
+    creationTimestamp = getCurrentTimestamp();
+}
+
+std::string Process::executeCurrentInstruction() {
+    if (currentLine >= totalLines) {
+        return "";
+    }
+
+    std::string instr = instructions[currentLine];
+    currentLine++;
+    cpuTicksUsed++;
+    return instr;
+}
+
+void Process::changeState(ProcessState newState) {
+    ProcessState oldState = state;
+    state = newState;
+
+    if (newState == ProcessState::FINISHED && oldState != ProcessState::FINISHED) {
+        finishedTimestamp = getCurrentTimestamp();
+    }
+
+    EventBroadcaster::getInstance().broadcast(EventType::ON_PROCESS_STARTED, id,
+        "Process " + name + " changed to " + (newState == ProcessState::READY ? "READY" :
+            newState == ProcessState::RUNNING ? "RUNNING" :
+            newState == ProcessState::WAITING ? "WAITING" : "FINISHED"));
+}
+
+void Process::generateInstructions(int count) {
+    instructions.clear();
+    for (int i = 0; i < count; i++) {
+        instructions.push_back("Hello world from " + makeScreenName(id) + "!");
+    }
+    totalLines = count;
+    currentLine = 0;
+}
+
+bool Process::isFinished() const {
+    return currentLine >= totalLines;
 }

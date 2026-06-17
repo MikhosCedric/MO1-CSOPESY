@@ -48,6 +48,12 @@
     <ClCompile Include="ConfigParser.cpp">
       <Filter>FileSystem</Filter>
     </ClCompile>
+    <ClCompile Include="PrintLogger.cpp">
+      <Filter>FileSystem</Filter>
+    </ClCompile>
+    <ClCompile Include="Utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="EventBroadcaster.cpp">
       <Filter>EventBroadcasting</Filter>
     </ClCompile>
@@ -73,6 +79,12 @@
   <ItemGroup>
     <ClInclude Include="GlobalConfig.h">
       <Filter>Config</Filter>
+    </ClInclude>
+    <ClInclude Include="PrintLogger.h">
+      <Filter>FileSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="Utils.h">
+      <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="ConfigParser.h">
       <Filter>FileSystem</Filter>
@@ -102,6 +114,11 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="config.txt" />
+    <Text Include="config.txt">
+      <Filter>Config</Filter>
+    </Text>
+    <Text Include="instructions1.txt">
+      <Filter>Source Files</Filter>
+    </Text>
   </ItemGroup>
 </Project>

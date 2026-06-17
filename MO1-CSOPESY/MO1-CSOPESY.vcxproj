@@ -145,8 +145,10 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MainMenu.cpp" />
     <ClCompile Include="Process.cpp" />
+    <ClCompile Include="PrintLogger.cpp" />
     <ClCompile Include="ProcessScreen.cpp" />
     <ClCompile Include="Scheduler.cpp" />
+    <ClCompile Include="Utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ConfigParser.h" />
@@ -154,15 +156,18 @@
     <ClInclude Include="GlobalConfig.h" />
     <ClInclude Include="MainMenu.h" />
     <ClInclude Include="Process.h" />
+    <ClInclude Include="PrintLogger.h" />
     <ClInclude Include="ProcessScreen.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="Scheduler.h" />
+    <ClInclude Include="Utils.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="MO1-CSOPESY.rc" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="config.txt" />
+    <Text Include="instructions1.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

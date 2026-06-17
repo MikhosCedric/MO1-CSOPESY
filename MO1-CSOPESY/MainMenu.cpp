@@ -1,12 +1,27 @@
 #include "MainMenu.h"
 #include "ConfigParser.h"
 #include "EventBroadcaster.h"
+#include "Scheduler.h"
+#include "ProcessScreen.h"
+#include "PrintLogger.h"
 
 #include <iostream>
 #include <sstream>
+#include <thread>
+#include <chrono>
 
 MainMenu::MainMenu() {
     isInitialized = false;
+    scheduler = new Scheduler();
+    processScreen = new ProcessScreen(scheduler);
+}
+
+MainMenu::~MainMenu() {
+    if (scheduler->isRunning()) {
+        scheduler->stop();
+    }
+    delete processScreen;
+    delete scheduler;
 }
 
 void MainMenu::printHeader() {
@@ -20,29 +35,30 @@ void MainMenu::run() {
     printHeader();
     std::string input;
 
-    // The Master Input Loop
     while (true) {
         std::cout << "root:\\> ";
         std::getline(std::cin, input);
 
-        // Ignore empty 'Enter' presses
         if (input.empty()) {
             continue;
         }
 
-        // The exit command works regardless of initialization
         if (input == "exit") {
+            if (scheduler->isRunning()) {
+                scheduler->stop();
+            }
+
+            PrintLogger::setEnabled(false);
+
             std::cout << "Terminating CSOPESY Emulator. Goodbye!\n";
-            break; // Breaks the while loop and closes the program
+            break;
         }
 
-        // Pass the input to the command handler
         handleCommand(input);
     }
 }
 
 void MainMenu::handleCommand(const std::string& commandLine) {
-    // Split the string by spaces to get the command and its arguments
     std::istringstream iss(commandLine);
     std::vector<std::string> args;
     std::string arg;
@@ -53,30 +69,36 @@ void MainMenu::handleCommand(const std::string& commandLine) {
 
     std::string command = args[0];
 
-    // 1. Initialization Command
     if (command == "initialize") {
         handleInitialize();
     }
-    // THE INITIALIZATION LOCK: Block all other commands if not initialized
     else if (!isInitialized) {
         std::cout << "Error: You must run 'initialize' before using any other commands.\n";
     }
-    // 2. Screen Commands (Multiplexer)
     else if (command == "screen") {
         handleScreen(args);
     }
-    // 3. Scheduler Commands (Dummy generation)
-    else if (command == "scheduler-start" || command == "scheduler-test") {
-        std::cout << "Starting scheduler dummy generation... (To be connected to CPU module)\n";
+    else if (command == "scheduler-start") {
+        scheduler->start();
+    }
+    else if (command == "scheduler-test") {
+        // Create a batch of test processes and start scheduler
+        scheduler->createTestProcesses(10, 100);
+        scheduler->start();
     }
     else if (command == "scheduler-stop") {
-        std::cout << "Stopping scheduler dummy generation... (To be connected to CPU module)\n";
+        scheduler->stop();
     }
-    // 4. Report Utility
     else if (command == "report-util") {
         handleReportUtil();
     }
-    // Unknown Command Fallback
+    else if (command == "screen-1s") {
+        // Periodic screen -ls every second (5 times)
+        for (int i = 0; i < 5; i++) {
+            processScreen->listScreens();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
     else {
         std::cout << "Command not recognized: " << command << "\n";
     }
@@ -90,10 +112,14 @@ void MainMenu::handleInitialize() {
 
     std::cout << "Initializing system...\n";
 
-    // Call Pair B's FileSystem ConfigParser
     if (ConfigParser::loadConfig("config.txt")) {
         isInitialized = true;
+
+        scheduler->createTestProcesses(10, 100);
+        scheduler->start();
+
         std::cout << "Initialization complete. All systems go!\n";
+        std::cout << "10 processes created with FCFS scheduler running on 4 cores.\n";
     }
     else {
         std::cout << "Failed to initialize. Please check if config.txt exists.\n";
@@ -109,15 +135,15 @@ void MainMenu::handleScreen(const std::vector<std::string>& args) {
     std::string flag = args[1];
 
     if (flag == "-ls") {
-        std::cout << "Listing screens... (Pair B will connect this to Scheduler queues soon)\n";
+        processScreen->listScreens();
     }
     else if (flag == "-s" && args.size() > 2) {
         std::string processName = args[2];
-        std::cout << "Creating/Attaching to screen: " << processName << " (Pair A will build this View)\n";
+        processScreen->attachScreen(processName);
     }
     else if (flag == "-r" && args.size() > 2) {
         std::string processName = args[2];
-        std::cout << "Re-attaching to screen: " << processName << " (Pair A will build this View)\n";
+        processScreen->reattachScreen(processName);
     }
     else {
         std::cout << "Invalid screen command format.\n";
@@ -125,5 +151,42 @@ void MainMenu::handleScreen(const std::vector<std::string>& args) {
 }
 
 void MainMenu::handleReportUtil() {
-    std::cout << "Generating report-util... (Pair B will use std::ofstream to build csopesy-log.txt here)\n";
+    auto allProcs = scheduler->getAllProcesses();
+
+    std::cout << "Generating report-util...\n";
+    std::cout << "========================================\n";
+    std::cout << "CPU Utilization Report" << "\n";
+    std::cout << "========================================\n";
+    std::cout << "Scheduler: First-Come-First-Serve (FCFS)\n";
+    std::cout << "CPU Cores: 4\n\n";
+
+    int totalProcesses = 0;
+    int finishedCount = 0;
+    int totalInstructions = 0;
+    int executedInstructions = 0;
+
+    for (const auto& p : allProcs) {
+        totalProcesses++;
+        totalInstructions += p->totalLines;
+        executedInstructions += p->currentLine;
+
+        std::cout << p->name << ": "
+            << p->currentLine << " / " << p->totalLines
+            << " instructions completed";
+        if (p->state == ProcessState::FINISHED) {
+            std::cout << " [FINISHED]";
+            finishedCount++;
+        }
+        else if (p->state == ProcessState::RUNNING) {
+            std::cout << " [RUNNING on Core " << p->assignedCore << "]";
+        }
+        else {
+            std::cout << " [PENDING]";
+        }
+        std::cout << "\n";
+    }
+
+    std::cout << "\nTotal processes: " << totalProcesses << "\n";
+    std::cout << "Finished: " << finishedCount << "\n";
+    std::cout << "Overall progress: " << executedInstructions << " / " << totalInstructions << "\n";
 }
