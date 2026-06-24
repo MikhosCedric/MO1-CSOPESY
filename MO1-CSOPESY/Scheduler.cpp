@@ -102,6 +102,22 @@ void Scheduler::schedulerLoop() {
     while (running) {
         std::lock_guard<std::mutex> lock(mtx);
 
+        // Wake any sleeping processes whose timer has elapsed and requeue them.
+        for (auto it = sleepingList.begin(); it != sleepingList.end();) {
+            Process* p = *it;
+            if (p->sleepTicksRemaining > 0) {
+                p->sleepTicksRemaining--;
+            }
+            if (p->sleepTicksRemaining <= 0) {
+                p->state = ProcessState::READY;
+                readyQueue.push(p);
+                it = sleepingList.erase(it);
+            }
+            else {
+                ++it;
+            }
+        }
+
         for (int i = 0; i < numCPU; i++) {
             if (cores[i] == nullptr && !readyQueue.empty()) {
                 Process* p = readyQueue.front();
@@ -129,17 +145,17 @@ void Scheduler::cpuLoop(int coreId) {
         }
 
         if (p != nullptr && p->state == ProcessState::RUNNING) {
-            std::string output = p->executeCurrentInstruction();
+            ExecResult result = p->executeCurrentInstruction();
 
-            if (!output.empty()) {
-                if (p->currentLine == 1) {
-                    std::lock_guard<std::mutex> lock(mtx);
-                    EventBroadcaster::getInstance().broadcast(
-                        EventType::ON_PROCESS_STARTED, p->id,
-                        "Process " + p->name + " started execution on Core " + std::to_string(coreId));
-                }
+            if (p->currentLine == 1) {
+                std::lock_guard<std::mutex> lock(mtx);
+                EventBroadcaster::getInstance().broadcast(
+                    EventType::ON_PROCESS_STARTED, p->id,
+                    "Process " + p->name + " started execution on Core " + std::to_string(coreId));
+            }
 
-                PrintLogger::log(p->id, coreId, output);
+            if (result.hasOutput) {
+                PrintLogger::log(p->id, coreId, result.output);
             }
 
             if (p->isFinished()) {
@@ -152,6 +168,15 @@ void Scheduler::cpuLoop(int coreId) {
                 EventBroadcaster::getInstance().broadcast(
                     EventType::ON_PROCESS_FINISHED, p->id,
                     "Process " + p->name + " finished execution");
+            }
+            else if (result.slept) {
+                // SLEEP: move process to waiting until woken
+                std::lock_guard<std::mutex> lock(mtx);
+                p->state = ProcessState::WAITING;
+                p->sleepTicksRemaining = result.sleepTicks;
+                p->assignedCore = -1;
+                cores[coreId] = nullptr;
+                sleepingList.push_back(p);
             }
 
             if (delayPerExec > 0) {

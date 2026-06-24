@@ -30,6 +30,7 @@ private:
     std::queue<Process*> readyQueue;
     std::vector<std::unique_ptr<Process>> allProcesses;
     std::vector<Process*> finishedList;
+    std::vector<Process*> sleepingList;
     Process* cores[4];
 
     std::thread schedulerThread;
