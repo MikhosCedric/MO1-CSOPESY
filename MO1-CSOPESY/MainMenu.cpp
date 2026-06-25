@@ -1,14 +1,15 @@
 #include "MainMenu.h"
 #include "ConfigParser.h"
-#include "EventBroadcaster.h"
 #include "Scheduler.h"
 #include "ProcessScreen.h"
 #include "PrintLogger.h"
+#include "GlobalConfig.h"
 
 #include <iostream>
 #include <sstream>
 #include <thread>
 #include <chrono>
+#include <cstdlib>
 
 MainMenu::MainMenu() {
     isInitialized = false;
@@ -72,6 +73,9 @@ void MainMenu::handleCommand(const std::string& commandLine) {
     if (command == "initialize") {
         handleInitialize();
     }
+    else if (command == "clear") {
+        clearScreen();
+    }
     else if (!isInitialized) {
         std::cout << "Error: You must run 'initialize' before using any other commands.\n";
     }
@@ -82,8 +86,8 @@ void MainMenu::handleCommand(const std::string& commandLine) {
         scheduler->start();
     }
     else if (command == "scheduler-test") {
-        // Create a batch of test processes and start scheduler
-        scheduler->createTestProcesses(10, 100);
+        GlobalConfig& config = GlobalConfig::getInstance();
+        scheduler->createTestProcesses(10, config.minIns);
         scheduler->start();
     }
     else if (command == "scheduler-stop") {
@@ -93,7 +97,6 @@ void MainMenu::handleCommand(const std::string& commandLine) {
         handleReportUtil();
     }
     else if (command == "screen-1s") {
-        // Periodic screen -ls every second (5 times)
         for (int i = 0; i < 5; i++) {
             processScreen->listScreens();
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -115,11 +118,9 @@ void MainMenu::handleInitialize() {
     if (ConfigParser::loadConfig("config.txt")) {
         isInitialized = true;
 
-        scheduler->createTestProcesses(10, 100);
-        scheduler->start();
-
         std::cout << "Initialization complete. All systems go!\n";
-        std::cout << "10 processes created with FCFS scheduler running on 4 cores.\n";
+        std::cout << "Scheduler: " << GlobalConfig::getInstance().scheduler << "\n";
+        std::cout << "CPU Cores: " << GlobalConfig::getInstance().numCPU << "\n";
     }
     else {
         std::cout << "Failed to initialize. Please check if config.txt exists.\n";
@@ -155,10 +156,10 @@ void MainMenu::handleReportUtil() {
 
     std::cout << "Generating report-util...\n";
     std::cout << "========================================\n";
-    std::cout << "CPU Utilization Report" << "\n";
+    std::cout << "CPU Utilization Report\n";
     std::cout << "========================================\n";
-    std::cout << "Scheduler: First-Come-First-Serve (FCFS)\n";
-    std::cout << "CPU Cores: 4\n\n";
+    std::cout << "Scheduler: " << GlobalConfig::getInstance().scheduler << "\n";
+    std::cout << "CPU Cores: " << GlobalConfig::getInstance().numCPU << "\n\n";
 
     int totalProcesses = 0;
     int finishedCount = 0;
@@ -180,6 +181,9 @@ void MainMenu::handleReportUtil() {
         else if (p->state == ProcessState::RUNNING) {
             std::cout << " [RUNNING on Core " << p->assignedCore << "]";
         }
+        else if (p->state == ProcessState::WAITING) {
+            std::cout << " [WAITING]";
+        }
         else {
             std::cout << " [PENDING]";
         }
@@ -189,4 +193,13 @@ void MainMenu::handleReportUtil() {
     std::cout << "\nTotal processes: " << totalProcesses << "\n";
     std::cout << "Finished: " << finishedCount << "\n";
     std::cout << "Overall progress: " << executedInstructions << " / " << totalInstructions << "\n";
+}
+
+void MainMenu::clearScreen() {
+#ifdef _WIN32
+    std::system("cls");
+#else
+    std::system("clear");
+#endif
+    printHeader();
 }

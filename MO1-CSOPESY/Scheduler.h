@@ -9,6 +9,7 @@
 #include <atomic>
 #include <mutex>
 #include <memory>
+#include <string>
 
 class Scheduler {
 public:
@@ -26,16 +27,28 @@ public:
 private:
     void schedulerLoop();
     void cpuLoop(int coreId);
+    Process* createProcessLocked(int instructionCount);
+    int randomInstructionCount() const;
+    bool isRoundRobin() const;
 
     std::queue<Process*> readyQueue;
+    std::vector<Process*> waitingList;
     std::vector<std::unique_ptr<Process>> allProcesses;
     std::vector<Process*> finishedList;
-    Process* cores[4];
+    std::vector<Process*> cores;
 
     std::thread schedulerThread;
-    std::thread cpuThreads[4];
+    std::vector<std::thread> cpuThreads;
     std::atomic<bool> running;
+    std::atomic<int> totalCpuCycles;
     int numCPU;
+    int quantumCycles;
+    int batchProcessFreq;
+    int minInstructions;
+    int maxInstructions;
+    int delayPerExec;
+    int nextProcessId;
+    std::string schedulerType;
     mutable std::mutex mtx;
 };
 

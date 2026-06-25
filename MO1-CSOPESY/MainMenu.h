@@ -21,6 +21,7 @@ private:
     ProcessScreen* processScreen;
 
     void printHeader();
+	void clearScreen();
     void handleCommand(const std::string& commandLine);
 
     void handleInitialize();
