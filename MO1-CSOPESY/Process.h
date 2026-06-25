@@ -74,7 +74,7 @@ public:
     // ==========================================
     // PAIR A (Process Internals): Internal Variables
     // ==========================================
-    std::vector<std::string> instructions;             // The simulated lines of code
+    std::vector<Instruction> instructions;             // The simulated lines of code
     int currentLine;                                   // Which line we are currently executing
     int totalLines;                                    // Total lines of code
     std::unordered_map<std::string, uint16_t> memory;  // Local memory (clamped 0-65535)
