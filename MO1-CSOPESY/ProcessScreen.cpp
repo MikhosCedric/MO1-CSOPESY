@@ -24,10 +24,10 @@ void ProcessScreen::listScreens() {
                 std::cout << p->name << "   (" << timeStr << ")     Core: " << p->assignedCore
                     << "     " << p->currentLine << " / " << p->totalLines << "\n";
             }
-            //else {
-            //    std::cout << p->name << "   (" << timeStr << ")     Core: (none) "
-            //        << "   " << p->currentLine << " / " << p->totalLines << "\n";
-            //}
+            else {
+                std::cout << p->name << "   (" << timeStr << ")     Ready       "
+                    << p->currentLine << " / " << p->totalLines << "\n";
+            }
         }
     }
     if (!hasRunning) {

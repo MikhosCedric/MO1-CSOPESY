@@ -149,7 +149,9 @@ void Scheduler::schedulerLoop() {
             }
 
             if (allProcesses.empty()) {
-                createProcessLocked(randomInstructionCount());
+                for (int i = 0; i < numCPU; i++) {
+                    createProcessLocked(randomInstructionCount());
+                }
             }
 
             int currentCycle = totalCpuCycles.load();
