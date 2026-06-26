@@ -30,7 +30,12 @@ void Scheduler::onTick(uint64_t tick) {
     // Phase 2: Process cores
     for (size_t i = 0; i < cores.size(); i++) {
         Process* proc = cores[i];
-        if (!proc || proc->isFinished()) continue;
+        if (!proc) continue;
+        if (proc->isFinished()) {
+            cores[i] = nullptr;
+            cpuQuantumCounter.erase(proc->id);
+            continue;
+        }
 
         coreTickCounters[i]++;
 
@@ -51,7 +56,7 @@ void Scheduler::onTick(uint64_t tick) {
         else if (proc->sleepRemaining > 0) {
             sleepingQueue.push_back({ proc, proc->sleepRemaining });
             proc->sleepRemaining = 0;
-            proc->state = ProcessState::READY;
+            proc->state = ProcessState::SLEEPING;
             proc->attachedCore = -1;
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);

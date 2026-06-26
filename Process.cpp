@@ -209,8 +209,8 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
     std::vector<Instruction> result;
     std::uniform_int_distribution<uint32_t> countDist(minIns, maxIns);
     std::uniform_int_distribution<int> typeDist(0, 9);
-    std::uniform_int_distribution<uint16_t> valDist(0, 1000);
-    std::uniform_int_distribution<int> sleepDist(1, 10);
+    std::uniform_int_distribution<uint16_t> valDist(0, UINT16_MAX);
+    std::uniform_int_distribution<int> sleepDist(0, 255);
     std::uniform_int_distribution<int> repeatDist(2, 5);
     std::uniform_int_distribution<int> concatDist(0, 2);
     std::uniform_int_distribution<int> rareDist(0, 4);

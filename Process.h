@@ -11,7 +11,7 @@ enum class Opcode {
 };
 
 enum class ProcessState {
-    READY, RUNNING, FINISHED
+    READY, RUNNING, SLEEPING, FINISHED
 };
 
 struct Instruction {
