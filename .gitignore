@@ -8,6 +8,13 @@ Release/
 *.pdb
 *.ilk
 *.log
+*.pdf
+*.md
 stdin
 stdout.txt
 csopesy-log.txt
+classSpecs.txt
+specs.txt
+num5.txt
+test1.txt
+opencode.json
