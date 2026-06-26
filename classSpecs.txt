@@ -1,0 +1,131 @@
+CSOPESY Major Output: Process Scheduler and CLI
+================================================================================
+Updated as of: May 7, 2025 [cite: 2]
+Created By: Neil Patrick Del Gallego, PhD [cite: 3]
+Points: 100 pts [cite: 4]
+
+GENERAL INSTRUCTIONS
+--------------------------------------------------------------------------------
+The first part of your emulator is the process multiplexer and your command-line interpreter (CLI)[cite: 4]. Please refer to a general Linux/Windows powershell/Windows command line; this serves as a strong reference for the design of your command-line interface[cite: 56]. For the process multiplexer, refer to the Linux "screen" command on its behavior[cite: 57]. 
+
+CHECKLIST OF REQUIREMENTS
+--------------------------------------------------------------------------------
+Your system must have ALL the following features implemented properly[cite: 59].
+
+1. Main Menu Console [cite: 60]
+   A main menu console for recognizing the following commands:
+   * "initialize" - initialize the processor configuration of the application. This must be called before any other command could be recognized, aside from "exit"[cite: 60].
+   * "exit" - terminates the console[cite: 60].
+   * "screen" - see additional details[cite: 60].
+   * "scheduler-start" - continuously generates a batch of dummy processes for the CPU scheduler. Each process is accessible via the "screen" command[cite: 60].
+   * "scheduler-stop" - stops generating dummy processes[cite: 60].
+   * "report-util" - for generating CPU utilization report[cite: 60].
+
+   Console Output Mockup[cite: 60]:
+   CSOPESY
+   Welcome to CSOPESY Emulator!
+   Developers:
+   Del Gallego, Neil Patrick
+
+   Last updated: 01-10-2024
+
+   root:\>
+
+2. "screen" Command Support [cite: 60]
+   From the main menu, the user can perform the following:
+   * Create a new process via "screen -s <process name>" command[cite: 60].
+   * Lists all running processes via "screen -ls" command[cite: 60].
+
+3. Barebones Process Instructions [cite: 60, 62]
+   Support basic process instructions, akin to programming language instructions:
+   * PRINT(msg) - display an output "msg" to the console. The output can only be seen when the user is inside its attached screen[cite: 60]. The "msg" can print 1 variable, "var." E.g. PRINT("Value from: " + x)[cite: 60].
+   * DECLARE(var, value) - declares a uint16 with variable name "var", and a default "value"[cite: 60].
+   * ADD (var1, var2/value, var3/value) - performs an addition operation: var1 = var2/value + var3/value[cite: 60]. Variables are automatically declared with a value of 0 if they have not yet been declared beforehand. Can also add a uint16 value[cite: 60].
+   * SUBTRACT (var1, var2/value, var3/value) - performs a subtraction operation: var1 = var2/value - var3/value[cite: 60].
+   * SLEEP (X) - sleeps the current process for X (uint8) CPU ticks and relinquishes the CPU[cite: 60].
+   * FOR([instructions], repeats) - performs a for-loop, given a set/array of instructions. Can be nested[cite: 60].
+
+   Notes:
+   * Process instructions are pre-determined and not typed by the user (e.g., randomized via scheduler-start)[cite: 60].
+   * Variables are stored in memory and will not be released until the process finishes[cite: 62].
+   * uint16 variables are clamped between (0, max(uint16))[cite: 62].
+   * Unless specified in the test case, the "msg" in the PRINT function should always be "Hello world from <process_name>!"[cite: 62].
+   * For loops can be nested up to 3 times[cite: 62].
+
+4. Generation of CPU Utilization Report [cite: 62]
+   The console should be able to generate a utilization report whenever the "report-util" command is entered[cite: 62].
+
+5. Configuration Setting [cite: 62]
+   The "initialize" commands should read from a "config.txt" file, the parameters for your CPU scheduler and process attributes[cite: 62].
+
+
+THE "SCREEN" COMMAND SPECIFICATIONS
+--------------------------------------------------------------------------------
+The "screen" command emulates the screen multiplexer of Linux OS[cite: 64]. 
+* When the user types "screen -s <process name>" from the main menu console, the console will clear its contents and "move" to the process screen[cite: 149].
+* At any given time, any process can finish its execution. If this happens, the user can no longer access the screen after exiting[cite: 159, 160].
+* The user can access the screen anytime by typing "screen -r <process name>" in the main menu[cite: 161]. If the process name is not found/finished execution, the console prints "Process <process name> not found."[cite: 162].
+
+Inside the Process Screen, the user can type[cite: 150]:
+* "process-smi" - Prints a simple information about the process[cite: 151]. The process contains dummy instructions that the CPU executes in the background[cite: 152]. Whenever the user types "process-smi", it provides the updated details and accompanying logs from the print instructions[cite: 153]. If the process has finished, simply print "Finished!" after the process name, ID, and logs have been printed[cite: 154, 155].
+* "exit" - Returns the user to the main menu[cite: 156].
+
+
+THE "SCHEDULER-START" AND "SCHEDULER-STOP" COMMANDS
+--------------------------------------------------------------------------------
+* "scheduler-start" - Every X CPU ticks, a new process is generated and put into the ready queue for your CPU scheduler[cite: 166]. This frequency can be set in the "config.txt"[cite: 167]. As long as CPU cores are available, each process can be executed and be accessible via the "screen" command[cite: 167]. You must generate human-readable process names (E.g.: p01, p02, ..., p1240)[cite: 170, 171].
+* "scheduler-stop" - Stops generating dummy processes[cite: 168].
+These commands are only accessible in the main menu console[cite: 169].
+
+
+THE "SCREEN -LS" AND "REPORT-UTIL" COMMANDS
+--------------------------------------------------------------------------------
+These commands should be similar. The only difference is that "report-util" saves this into a text file - "csopesy-log.txt." [cite: 173]
+* Output must list CPU utilization, cores used, and cores available[cite: 251].
+* Output must print a summary of the running and finished processes[cite: 251]. Note that all finished and currently running processes must be reported[cite: 163].
+
+
+THE SCHEDULER & CPU TICKS
+--------------------------------------------------------------------------------
+Your CPU scheduler is real-time and will continuously schedule processes as long as your console is alive[cite: 255]. The scheduler algorithm will be set through the "initialize" command and through the "config.txt" file[cite: 256].
+* For simplicity, assume that the CPU tick is an integer counter that tallies the number of frame passes[cite: 258].
+
+
+THE CONFIG.TXT FILE AND "INITIALIZE" COMMAND
+--------------------------------------------------------------------------------
+The user must first run the "initialize" command[cite: 273]. Once entered, it will read the "config.txt" file, which is space-separated in format, containing the following parameters[cite: 274]:
+
+* num-cpu: Number of CPUs available. The range is [1, 128][cite: 275].
+* scheduler: The scheduler algorithm: "fcfs" or "rr"[cite: 275].
+* quantum-cycles: The time slice is given for each processor if a round-robin scheduler is used. Has no effect on other schedulers. The range is [1, 2^32][cite: 275].
+* batch-process-freq: The frequency of generating processes in the "scheduler-start" command in CPU cycles. The range is [1, 2^32]. If one, a new process is generated at the end of each CPU cycle[cite: 275].
+* min-ins: The minimum instructions/command per process. The range is [1, 2^32][cite: 275].
+* max-ins: The maximum instructions/command per process. The range is [1, 2^32][cite: 275].
+* delay-per-exec: Delay before executing the next instruction in CPU cycles. The delay is a "busy-waiting" scheme wherein the process remains in the CPU. The range is [0, 2^32]. If zero, each instruction is executed per CPU cycle[cite: 275].
+
+
+ASSESSMENT METHOD
+--------------------------------------------------------------------------------
+Your CLI emulator will be assessed through a black box quiz system in a time-pressure format[cite: 292]. You should only modify the parameters and no longer recompile the CLI when taking the quiz[cite: 294]. Test cases, parameters, and instructions are provided per question, wherein you must submit a video file (.MP4), demonstrating your CLI[cite: 295]. Some questions will require submitting PowerPoint presentations[cite: 296].
+
+Important Dates[cite: 298, 299]:
+* Week 7: Mockup test case and quiz
+* Week 8: Actual test case and quiz
+
+
+SUBMISSION DETAILS
+--------------------------------------------------------------------------------
+* SOURCE: Contains your source code. Add a README.txt with your name and instructions on running your program[cite: 303]. Indicate the entry class file where the main function is located. An alternative can be a GitHub link[cite: 304].
+* PPT: A technical report of your system containing[cite: 305]:
+  - Command recognition [cite: 307]
+  - Console UI implementation [cite: 308]
+  - Command interpreter implementation [cite: 309]
+  - Process representation [cite: 310]
+  - Scheduler implementation [cite: 311]
+
+
+GRADING SCHEME (Robustness)
+--------------------------------------------------------------------------------
+* No points: The CLI did not pass the test case. NO WORKAROUND is available[cite: 315].
+* Partial points: The CLI did not pass the test case. A workaround is available to produce the expected output[cite: 315].
+* Full points: The CLI passed the test case using varying inputs and produced the expected output[cite: 315].

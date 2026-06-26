@@ -1,0 +1,31 @@
+### 5. Process Multiplexer (`screen` command) & UI Layout
+* `screen -s <name>`: Creates a new process, CLEARS the console, and visually "attaches" the console to it. **CRITICAL:** This manually created process must immediately generate instructions between `min-ins` and `max-ins` and be pushed into the scheduler's ready queue.
+* `screen -r <name>`: Re-attaches to an existing process and CLEARS the console. Print "Process <name> not found." if it doesn't exist.
+* Inside a screen, implement the following commands strictly matching this layout:
+    * `exit`: Detaches and returns to the main `root:\>` menu.
+    * `process-smi`: Prints the updated process execution state. **YOU MUST EXACTLY MATCH THE FOLLOWING FORMATTING:**
+
+      **[IF PROCESS IS STILL RUNNING]**
+      Process name: <process_name>
+      ID: <process_id>
+      Logs:
+      (<MM/DD/YYYY HH:MM:SS[AM/PM]>) Core:<core_id> "<print_msg>"
+      (<MM/DD/YYYY HH:MM:SS[AM/PM]>) Core:<core_id> "<print_msg>"
+      
+      Current instruction line: <current_line>
+      Lines of code: <total_lines>
+
+      **[IF PROCESS IS FINISHED]**
+      Process name: <process_name>
+      ID: <process_id>
+      Logs:
+      (<MM/DD/YYYY HH:MM:SS[AM/PM]>) Core:<core_id> "<print_msg>"
+      (<MM/DD/YYYY HH:MM:SS[AM/PM]>) Core:<core_id> "<print_msg>"
+      Finished!
+
+* `screen -ls` (Main menu): Prints system summary:
+    * CPU utilization % (Dynamically calculated: Active Cores / Total Cores * 100)
+    * Cores used / Cores available
+    * List of Running processes (Name, Timestamp, Core assigned, Instructions completed / Total instructions)
+    * List of Finished processes (Name, Timestamp, "Finished", Instructions completed / Total instructions)
+* `report-util`: Generates the exact same output as `screen -ls` but writes it to `csopesy-log.txt`.

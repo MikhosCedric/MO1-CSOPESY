@@ -1,0 +1,63 @@
+Act as an expert Systems Programmer. I need you to build a comprehensive OS Emulator featuring a Command-Line Interpreter (CLI) and a real-time Process Scheduler. We will be building this using an object-oriented approach suitable for Visual Studio Code. Please provide the code in C++ (as it is standard for OS concepts), but ensure the architecture is highly modular.
+
+Here are the strict specifications you must implement:
+
+### 1. Project Structure
+Create a modular project structure with the following files:
+* `main.cpp` (Entry point and main loop)
+* `ConsoleManager.h / .cpp` (Handles CLI input/output, main menu, and ASCII art)
+* `Process.h / .cpp` (Represents the PCB - Process Control Block, variable memory, and instruction parsing)
+* `Scheduler.h / .cpp` (Handles ready queues, active cores, FCFS, and RR algorithms)
+* `ConfigManager.h / .cpp` (Parses the `config.txt` file)
+* `ScreenManager.h / .cpp` (Handles the multiplexer logic and viewing specific process logs)
+
+### 2. Core Constraints & Main CLI
+* The main menu must prompt with `root:\>`.
+* Print an ASCII header upon startup with "CSOPESY", "Welcome to CSOPESY Emulator!", and "Last updated: [Current Date]".
+* The console MUST NOT accept any commands other than `initialize` and `exit` upon fresh startup. 
+* `initialize`: Reads a space-separated `config.txt` file. Once successful, UNLOCK the following main menu commands:
+    * `screen`: (Allows flags -s, -r, -ls as detailed below)
+    * `scheduler-start`: Starts the dummy process generation.
+    * `scheduler-stop`: Halts the dummy process generation.
+    * `report-util`: Generates the text file report.
+* `exit`: Safely terminates the main `while(isRunning)` loop.
+
+### 3. The `config.txt` Parameters
+Implement parsing for the following keys:
+* `num-cpu` (int, 1-128)
+* `scheduler` (string: "fcfs" or "rr")
+* `quantum-cycles` (int, 1 to 2^32)
+* `batch-process-freq` (int, 1 to 2^32)
+* `min-ins` and `max-ins` (int, 1 to 2^32)
+* `delay-per-exec` (int, 0 to 2^32)
+
+### 4. Process Scheduler & Ticks
+* Implement a global `cpuCycles` integer that increments every iteration of the main application loop.
+* `scheduler-start` command: Every `batch-process-freq` ticks, generate a dummy process named `p01`, `p02`, etc. Put it in the ready queue.
+* `scheduler-stop` command: Halts the automatic generation. 
+* The scheduler must continuously dispatch processes to available CPUs (cores) based on the `config.txt` algorithm (FCFS or RR).
+* **Dynamic CPU Utilization:** The scheduler must track active vs. idle cores. Utilization is calculated as `(Active Cores / Total Cores) * 100`. If all processes finish execution, utilization must drop to 0%.
+
+### 5. Process Multiplexer (`screen` command)
+* `screen -s <name>`: Creates a new process and visually "attaches" the console to it. **CRITICAL:** This manually created process must immediately generate instructions between `min-ins` and `max-ins` and be pushed into the scheduler's ready queue alongside auto-generated processes.
+* `screen -r <name>`: Re-attaches to an existing process. Print "Process <name> not found." if it doesn't exist.
+* Inside a screen:
+    * Command `process-smi`: Prints the Process Name, ID, assigned Core, and the simulated instruction execution logs. If complete, append "Finished!".
+    * Command `exit`: Detaches and returns to the `root:\>` menu.
+* `screen -ls` (Main menu): Prints system summary:
+    * CPU utilization % (Dynamically calculated as noted above)
+    * Cores used / Cores available
+    * List of Running processes (Name, Timestamp, Core assigned, Instructions completed / Total instructions)
+    * List of Finished processes (Name, Timestamp, "Finished", Instructions completed / Total instructions)
+* `report-util`: Generates the exact same output as `screen -ls` but writes it to `csopesy-log.txt`.
+
+### 6. Barebones Process Instructions
+Each generated process must have a randomized sequence of instructions. Variables are stored in process memory and are strictly released only when the process finishes. Implement an instruction parser/executor for:
+* `PRINT(msg)`: Appends to the process's internal log (only visible inside its attached screen). Default `msg` is "Hello world from <process_name>!" unless specified. It must support concatenating exactly 1 variable (e.g., `PRINT("Value from: " + x)`).
+* `DECLARE(var, value)`: Declares a `uint16_t` variable. Values must be clamped between `0` and `max(uint16_t)`.
+* `ADD(var1, var2/value, var3/value)`: Performs `var1 = var2/value + var3/value`. **CRITICAL:** If any variables are undeclared, they must be automatically declared with a value of `0`. Supports raw `uint16_t` values as well. 
+* `SUBTRACT(var1, var2/value, var3/value)`: Performs `var1 = var2/value - var3/value`. Follows the same auto-declaration rules.
+* `SLEEP(X)`: Sleeps the current process for `X` (`uint8_t`) CPU ticks. **CRITICAL:** This instruction must relinquish the CPU back to the scheduler, moving the process out of the running state so another process can utilize the core. 
+* `FOR([instructions], repeats)`: Executes a block of instructions. Must support nesting up to 3 levels deep. 
+
+Please output the code for `main.cpp`, `ConfigManager`, and `ConsoleManager` first. Make sure the code is thoroughly commented, follows DRY principles, utilizes modern standard libraries, and strictly handles state changes to pass automated testing scenarios.

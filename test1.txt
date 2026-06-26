@@ -1,0 +1,19 @@
+The parameters for your "config.txt" should be:
+num-cpu 32
+scheduler "rr"
+quantum-cycles 1
+batch-process-freq 2
+min-ins 100
+max-ins 100
+delay-per-exec 0
+
+Upload a video that shows the following in sequence:
+
+1. Type the "scheduler-start" command.
+2. Wait for 10 seconds
+3. Type the "scheduler-stop" command.
+4. Wait for 30 seconds.
+5. Type the "screen-ls" command.
+6. Type the "report-util" command.
+
+Expected output: It should show a 0% CPU utilization printed in the screen-ls command and mostly finished processes. The log generated from the "report-util" command should show the same output from screen-ls.
