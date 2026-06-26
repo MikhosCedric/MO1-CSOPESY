@@ -213,6 +213,7 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
     std::uniform_int_distribution<int> sleepDist(1, 10);
     std::uniform_int_distribution<int> repeatDist(2, 5);
     std::uniform_int_distribution<int> concatDist(0, 2);
+    std::uniform_int_distribution<int> rareDist(0, 4);
 
     uint32_t count = countDist(rng());
 
@@ -250,8 +251,13 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
                 instr.val3 = valDist(rng());
                 break;
             case 4:
-                instr.opcode = Opcode::SLEEP;
-                instr.val1 = static_cast<uint16_t>(sleepDist(rng()));
+                if (rareDist(rng()) == 0) {
+                    instr.opcode = Opcode::SLEEP;
+                    instr.val1 = static_cast<uint16_t>(sleepDist(rng()));
+                }
+                else {
+                    instr.opcode = Opcode::PRINT;
+                }
                 break;
             }
         }
