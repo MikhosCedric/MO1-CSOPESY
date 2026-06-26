@@ -1,5 +1,13 @@
 .vs/
 x64/
+Debug/
+Release/
 *.user
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.log
 stdin
 stdout.txt
+csopesy-log.txt
