@@ -73,7 +73,7 @@ bool ConfigManager::validate(const Config& config) {
         std::cerr << "Error: scheduler must be 'fcfs' or 'rr'" << std::endl;
         return false;
     }
-    if (config.quantumCycles < 1) {
+    if (config.scheduler == "rr" && config.quantumCycles < 1) {
         std::cerr << "Error: quantum-cycles must be at least 1" << std::endl;
         return false;
     }
