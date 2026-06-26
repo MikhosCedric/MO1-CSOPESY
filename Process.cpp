@@ -229,7 +229,7 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
             instr.body = generateInstructions(bodyMin, bodyMax, depth + 1);
         }
         else {
-            int subType = type % 5;
+            int subType = type % 6;
             switch (subType) {
             case 0:
             case 1:
@@ -251,6 +251,12 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
                 instr.val3 = valDist(rng());
                 break;
             case 4:
+                instr.opcode = Opcode::SUBTRACT;
+                instr.arg1 = generateVariableName();
+                instr.arg2 = generateVariableName();
+                instr.val3 = valDist(rng());
+                break;
+            case 5:
                 if (rareDist(rng()) == 0) {
                     instr.opcode = Opcode::SLEEP;
                     instr.val1 = static_cast<uint16_t>(sleepDist(rng()));
