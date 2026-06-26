@@ -39,6 +39,11 @@ void ConsoleManager::run() {
 
         if (input.empty()) continue;
 
+        bool compactOutput = !screenMgr.isAttached() && input == "report-util";
+        if (!compactOutput) {
+            std::cout << std::endl;
+        }
+
         if (screenMgr.isAttached()) {
             if (input == "process-smi") {
                 std::lock_guard<std::mutex> lock(schedulerMutex);
@@ -68,6 +73,10 @@ void ConsoleManager::run() {
         else {
             processMainCommand(input);
         }
+
+        if (!compactOutput) {
+            std::cout << std::endl;
+        }
     }
 
     running = false;
@@ -83,9 +92,12 @@ void ConsoleManager::printHeader() const {
     dateStr << std::put_time(std::localtime(&t), "%d-%m-%Y");
 
     std::cout << "CSOPESY" << std::endl;
-    std::cout << "Welcome to CSOPESY Emulator!" << std::endl;
+    std::cout << "\nWelcome to CSOPESY Emulator!\n" << std::endl;
     std::cout << "Developers:" << std::endl;
-    std::cout << "Del Gallego, Neil Patrick" << std::endl;
+    std::cout << "Cabato, Diane" << std::endl;
+    std::cout << "Gumapos, Cedric" << std::endl;
+    std::cout << "Foo, James" << std::endl;
+    std::cout << "Julian, Jedidiah" << std::endl;
     std::cout << std::endl;
     std::cout << "Last updated: " << dateStr.str() << std::endl;
     std::cout << std::endl;
@@ -228,18 +240,25 @@ std::string ConsoleManager::buildUtilReport() {
     oss << "Cores used: " << coresUsed << std::endl;
     oss << "Cores available: " << coresAvail << std::endl;
 
-    oss << "\nRunning processes:" << std::endl;
+    oss << "\n----------------------------------------" << std::endl;
+    oss << "Running processes:" << std::endl;
     for (auto* p : scheduler->getRunningProcesses()) {
-        oss << "  " << p->name << " " << p->getTimestamp()
-            << " " << p->getCoreString()
-            << " " << p->currentLine << "/" << p->totalLines << std::endl;
+        oss << std::left << std::setw(12) << p->name
+            << " (" << p->getTimestamp() << ")"
+            << "   Core: " << std::setw(3) << p->attachedCore
+            << "   " << std::right << std::setw(5) << p->currentLine
+            << " / " << std::left << p->totalLines << std::endl;
     }
 
     oss << "\nFinished processes:" << std::endl;
     for (auto* p : scheduler->getFinishedProcesses()) {
-        oss << "  " << p->name << " " << p->getTimestamp()
-            << " Finished " << p->totalLines << "/" << p->totalLines << std::endl;
+        oss << std::left << std::setw(12) << p->name
+            << " (" << p->getTimestamp() << ")"
+            << "   Finished  "
+            << std::right << std::setw(5) << p->totalLines
+            << " / " << std::left << p->totalLines << std::endl;
     }
+    oss << "----------------------------------------" << std::endl;
 
     return oss.str();
 }
@@ -247,6 +266,10 @@ std::string ConsoleManager::buildUtilReport() {
 void ConsoleManager::handleScreenLS() {
     std::lock_guard<std::mutex> lock(schedulerMutex);
     if (!scheduler) return;
+    if (!batchRunning) {
+        std::cout << "Scheduler has not started. Type 'scheduler-start' first." << std::endl;
+        return;
+    }
     std::cout << buildUtilReport();
 }
 
@@ -261,6 +284,7 @@ void ConsoleManager::handleReportUtil() {
     std::ofstream file("csopesy-log.txt", std::ios::app);
     if (file.is_open()) {
         file << report;
+        std::cout << "root:\\> Report generated at csopesy-log.txt!" << std::endl;
     }
     else {
         std::cout << "Error: Could not open csopesy-log.txt" << std::endl;
