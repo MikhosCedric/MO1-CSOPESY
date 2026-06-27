@@ -92,7 +92,13 @@ void ConsoleManager::printHeader() const {
     std::ostringstream dateStr;
     dateStr << std::put_time(std::localtime(&t), "%d-%m-%Y");
 
-    std::cout << "CSOPESY" << std::endl;
+    std::cout << "______________________________________________\n";
+    std::cout << R"(  ____ ____   ___  ____  _____ ____ __   __
+ / ___/ ___| / _ \|  _ \| ____/ ___|\ \ / /
+| |   \___ \| | | | |_) |  _| \___ \ \ V / 
+| |___ ___) | |_| |  __/| |___ ___) | | |  
+ \____|____/ \___/|_|   |_____|____/  |_|  )" << std::endl;
+    std::cout << "______________________________________________\n";
     std::cout << "\nWelcome to CSOPESY Emulator!\n" << std::endl;
     std::cout << "Developers:" << std::endl;
     std::cout << "Cabato, Diane" << std::endl;
