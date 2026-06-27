@@ -268,7 +268,8 @@ std::string ConsoleManager::buildUtilReport() {
 void ConsoleManager::handleScreenLS() {
     std::lock_guard<std::mutex> lock(schedulerMutex);
     if (!scheduler) return;
-    if (!schedulerStarted) {
+    auto allProcesses = scheduler->getAllProcesses();
+    if (!schedulerStarted && allProcesses.empty()) {
         std::cout << "Scheduler has not started. Type 'scheduler-start' first." << std::endl;
         return;
     }
