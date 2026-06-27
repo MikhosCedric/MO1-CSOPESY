@@ -307,7 +307,8 @@ void ConsoleManager::backgroundTickLoop() {
 
         if (scheduler) {
             std::lock_guard<std::mutex> lock(schedulerMutex);
-            if (batchRunning && cpuCycles % scheduler->getConfig().batchProcessFreq == 0) {
+            uint64_t batchIntervalTicks = static_cast<uint64_t>(scheduler->getConfig().batchProcessFreq) * 20;
+            if (batchRunning && cpuCycles % batchIntervalTicks == 0) {
                 scheduler->generateBatchProcess();
             }
 
