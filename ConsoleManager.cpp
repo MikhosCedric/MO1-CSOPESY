@@ -290,7 +290,7 @@ void ConsoleManager::handleReportUtil() {
 
     // std::cout << report; // For checking purposes only
 
-    std::ofstream file("csopesy-log.txt", std::ios::app);
+    std::ofstream file("csopesy-log.txt");
     if (file.is_open()) {
         file << report;
         std::cout << "root:\\> Report generated at csopesy-log.txt!" << std::endl;
