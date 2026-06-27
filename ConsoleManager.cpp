@@ -13,7 +13,8 @@
 #include <cstdlib>
 
 ConsoleManager::ConsoleManager()
-    : initialized(false)
+    : schedulerStarted(false)
+    , initialized(false)
 {
 }
 
@@ -153,6 +154,7 @@ void ConsoleManager::processMainCommand(const std::string& input) {
             std::cout << "Scheduler is already running." << std::endl;
             return;
         }
+        schedulerStarted = true;
         batchRunning = true;
         std::cout << "Scheduler started." << std::endl;
     }
@@ -266,7 +268,7 @@ std::string ConsoleManager::buildUtilReport() {
 void ConsoleManager::handleScreenLS() {
     std::lock_guard<std::mutex> lock(schedulerMutex);
     if (!scheduler) return;
-    if (!batchRunning) {
+    if (!schedulerStarted) {
         std::cout << "Scheduler has not started. Type 'scheduler-start' first." << std::endl;
         return;
     }
