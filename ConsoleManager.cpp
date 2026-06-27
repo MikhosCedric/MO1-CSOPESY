@@ -302,16 +302,22 @@ void ConsoleManager::handleReportUtil() {
 
 void ConsoleManager::backgroundTickLoop() {
     while (running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        cpuCycles++;
-
         if (scheduler) {
             std::lock_guard<std::mutex> lock(schedulerMutex);
             if (batchRunning && cpuCycles % scheduler->getConfig().batchProcessFreq == 0) {
                 scheduler->generateBatchProcess();
             }
-
             scheduler->onTick(cpuCycles);
+            cpuCycles++;
         }
+
+        if (scheduler && scheduler->getConfig().delayPerExec == 0) {
+            std::lock_guard<std::mutex> lock(schedulerMutex);
+            if (scheduler->getCoresUsed() > 0 || !scheduler->getReadyProcesses().empty()) {
+                continue;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }

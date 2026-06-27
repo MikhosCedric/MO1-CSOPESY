@@ -46,6 +46,19 @@ void Scheduler::onTick(uint64_t tick) {
         if (coreTickCounters[i] >= static_cast<int>(config.delayPerExec)) {
             coreTickCounters[i] = 0;
             proc->advance();
+
+            if (config.delayPerExec == 0) {
+                while (!proc->isFinished() && proc->sleepRemaining == 0) {
+                    if (config.scheduler == "rr"
+                        && cpuQuantumCounter[proc->id] >= static_cast<int>(quantum)) {
+                        break;
+                    }
+                    proc->advance();
+                    if (config.scheduler == "rr") {
+                        cpuQuantumCounter[proc->id]++;
+                    }
+                }
+            }
         }
 
         if (proc->isFinished()) {
