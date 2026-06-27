@@ -49,7 +49,7 @@ public:
     int sleepRemaining;
     std::vector<ForContext> forStack;
 
-    Process(const std::string& name, uint32_t minIns, uint32_t maxIns);
+    Process(const std::string& name, uint32_t minIns, uint32_t maxIns, bool simpleInstructions = false);
 
     bool isFinished() const;
     std::string getTimestamp() const;
@@ -64,6 +64,7 @@ private:
     bool executeInstruction(const Instruction& instr);
 
     static std::vector<Instruction> generateInstructions(uint32_t minIns, uint32_t maxIns, uint32_t depth);
+    static std::vector<Instruction> generateSimpleInstructions(uint32_t minIns, uint32_t maxIns);
     static std::string generateVariableName();
     static uint16_t clampUint16(int64_t value);
 };

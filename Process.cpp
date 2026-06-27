@@ -12,7 +12,7 @@ static std::mt19937& rng() {
     return instance;
 }
 
-Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns)
+Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns, bool simpleInstructions)
     : name(name)
     , id(nextId++)
     , state(ProcessState::READY)
@@ -27,7 +27,9 @@ Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns)
     oss << std::put_time(std::localtime(&t), "%Y-%m-%d %H:%M:%S");
     creationTime = oss.str();
 
-    instructions = generateInstructions(minIns, maxIns, 0);
+    instructions = simpleInstructions
+        ? generateSimpleInstructions(minIns, maxIns)
+        : generateInstructions(minIns, maxIns, 0);
     totalLines = instructions.size();
 }
 
@@ -268,6 +270,22 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
             }
         }
 
+        result.push_back(instr);
+    }
+
+    return result;
+}
+
+std::vector<Instruction> Process::generateSimpleInstructions(uint32_t minIns, uint32_t maxIns) {
+    std::vector<Instruction> result;
+    std::uniform_int_distribution<uint32_t> countDist(minIns, maxIns);
+
+    uint32_t count = countDist(rng());
+    result.reserve(count);
+
+    for (uint32_t i = 0; i < count; i++) {
+        Instruction instr;
+        instr.opcode = Opcode::PRINT;
         result.push_back(instr);
     }
 
