@@ -86,7 +86,6 @@ void Process::advanceLine() {
         forStack.pop_back();
 
         if (forStack.empty()) {
-            currentLine++;
             if (currentLine >= instructions.size()) {
                 state = ProcessState::FINISHED;
             }
@@ -110,6 +109,7 @@ bool Process::advance() {
     }
 
     if (instr->opcode == Opcode::FOR) {
+        if (forStack.empty()) currentLine++;
         pushForContext(instr);
         return true;
     }
