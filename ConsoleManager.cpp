@@ -162,6 +162,13 @@ void ConsoleManager::processMainCommand(const std::string& input) {
         }
         schedulerStarted = true;
         batchRunning = true;
+        {
+            std::lock_guard<std::mutex> lock(schedulerMutex);
+            uint32_t coresToFill = scheduler->getCoresTotal();
+            for (uint32_t i = 0; i < coresToFill; i++) {
+                scheduler->generateBatchProcess();
+            }
+        }
         std::cout << "Scheduler started." << std::endl;
     }
     else if (input == "scheduler-stop") {
