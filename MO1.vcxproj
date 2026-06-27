@@ -138,15 +138,7 @@
     <ClInclude Include="ScreenManager.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="opencode.json" />
-    <None Include="specifications.md" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="classSpecs.txt" />
-    <Text Include="num5.txt" />
-    <Text Include="specs.txt" />
     <Text Include="config.txt" />
-    <Text Include="test1.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
