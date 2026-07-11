@@ -160,6 +160,9 @@ void ConsoleManager::processMainCommand(const std::string& input) {
             std::cout << "Scheduler is already running." << std::endl;
             return;
         }
+        if (!schedulerStarted) {
+            schedulerCycles = 0;
+        }
         schedulerStarted = true;
         batchRunning = true;
         std::cout << "Scheduler started." << std::endl;
@@ -307,11 +310,17 @@ void ConsoleManager::backgroundTickLoop() {
 
         if (scheduler) {
             std::lock_guard<std::mutex> lock(schedulerMutex);
-            if (batchRunning && cpuCycles % scheduler->getConfig().batchProcessFreq == 0) {
+            if (!schedulerStarted) {
+                continue;
+            }
+
+            uint64_t currentSchedulerTick = schedulerCycles++;
+
+            if (batchRunning && currentSchedulerTick % scheduler->getConfig().batchProcessFreq == 0) {
                 scheduler->generateBatchProcess();
             }
 
-            scheduler->onTick(cpuCycles);
+            scheduler->onTick(currentSchedulerTick);
         }
     }
 }

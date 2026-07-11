@@ -36,6 +36,7 @@ private:
     std::thread tickThread;
 
     std::atomic<uint64_t> cpuCycles{0};
-    bool schedulerStarted;
+    std::atomic<uint64_t> schedulerCycles{0};
+    std::atomic<bool> schedulerStarted;
     bool initialized;
 };
