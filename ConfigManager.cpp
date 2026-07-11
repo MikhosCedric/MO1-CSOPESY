@@ -59,6 +59,15 @@ Config ConfigManager::parse(const std::string& path) {
         else if (key == "delay-per-exec") {
             config.delayPerExec = static_cast<uint32_t>(std::stoul(valStr));
         }
+        else if (key == "max-overall-mem") {
+            config.maxOverallMem = static_cast<uint32_t>(std::stoul(valStr));
+        }
+        else if (key == "mem-per-frame") {
+            config.memPerFrame = static_cast<uint32_t>(std::stoul(valStr));
+        }
+        else if (key == "mem-per-proc") {
+            config.memPerProc = static_cast<uint32_t>(std::stoul(valStr));
+        }
     }
 
     return config;
@@ -83,6 +92,18 @@ bool ConfigManager::validate(const Config& config) {
     }
     if (config.minIns < 1 || config.maxIns < config.minIns) {
         std::cerr << "Error: invalid min-ins/max-ins range" << std::endl;
+        return false;
+    }
+    if (config.maxOverallMem < 1) {
+        std::cerr << "Error: max-overall-mem must be at least 1" << std::endl;
+        return false;
+    }
+    if (config.memPerFrame < 1 || config.maxOverallMem % config.memPerFrame != 0) {
+        std::cerr << "Error: mem-per-frame must divide max-overall-mem" << std::endl;
+        return false;
+    }
+    if (config.memPerProc < 1 || config.memPerProc > config.maxOverallMem) {
+        std::cerr << "Error: mem-per-proc must be between 1 and max-overall-mem" << std::endl;
         return false;
     }
     return true;

@@ -2,10 +2,15 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <fstream>
+#include <chrono>
+#include <ctime>
+#include <direct.h>
 
 Scheduler::Scheduler(const Config& config)
     : config(config)
     , quantum(config.scheduler == "rr" ? config.quantumCycles : 0)
+    , memory(config.maxOverallMem, config.memPerFrame, config.memPerProc)
     , batchCounter(0)
 {
     cores.resize(config.numCpu, nullptr);
@@ -32,6 +37,7 @@ void Scheduler::onTick(uint64_t tick) {
         Process* proc = cores[i];
         if (!proc) continue;
         if (proc->isFinished()) {
+            memory.free(proc->name);
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);
             continue;
@@ -49,6 +55,7 @@ void Scheduler::onTick(uint64_t tick) {
         }
 
         if (proc->isFinished()) {
+            memory.free(proc->name);
             finishedQueue.push_back(proc);
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);
@@ -71,18 +78,61 @@ void Scheduler::onTick(uint64_t tick) {
         }
     }
 
-    // Phase 3: Dispatch ready processes to idle cores
+    // Phase 3: Dispatch ready processes to idle cores.
+    // A process must hold memory to run. If it isn't in memory yet, try a
+    // first-fit allocation; if memory is full, the process reverts to the tail
+    // of the ready queue (no backing store) and we try the next candidate.
     for (size_t i = 0; i < cores.size(); i++) {
-        if (cores[i] == nullptr && !readyQueue.empty()) {
-            cores[i] = readyQueue.front();
-            readyQueue.front()->state = ProcessState::RUNNING;
-            readyQueue.front()->attachedCore = static_cast<int>(i);
-            coreTickCounters[i] = 0;
+        if (cores[i] != nullptr) continue;
+
+        size_t attempts = readyQueue.size();
+        while (attempts-- > 0 && !readyQueue.empty()) {
+            Process* candidate = readyQueue.front();
             readyQueue.erase(readyQueue.begin());
-            if (config.scheduler == "rr") {
-                cpuQuantumCounter[cores[i]->id] = 0;
+
+            if (memory.contains(candidate->name) || memory.allocate(candidate->name)) {
+                cores[i] = candidate;
+                candidate->state = ProcessState::RUNNING;
+                candidate->attachedCore = static_cast<int>(i);
+                coreTickCounters[i] = 0;
+                if (config.scheduler == "rr") {
+                    cpuQuantumCounter[candidate->id] = 0;
+                }
+                break;
             }
+
+            // Memory full: send back to the tail of the ready queue.
+            readyQueue.push_back(candidate);
         }
+    }
+
+    // Phase 4: Every quantum-cycles, dump a memory snapshot to disk while the
+    // simulation has live processes to schedule.
+    if (quantum > 0 && tick % quantum == 0) {
+        generateMemorySnapshot(tick);
+    }
+}
+
+void Scheduler::generateMemorySnapshot(uint64_t tick) {
+    // Only snapshot while there is scheduling activity, so we don't spew empty
+    // files before the first process or after everything has finished.
+    if (memory.getProcessCount() == 0 && readyQueue.empty()) return;
+
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::ostringstream ts;
+    ts << std::put_time(std::localtime(&t), "%m/%d/%Y %I:%M:%S%p");
+
+    // Write snapshots into a dedicated "log" folder (created on first use).
+    _mkdir("log");
+
+    uint64_t qq = tick / quantum;
+    std::ostringstream fname;
+    fname << "log/memory_stamp_" << std::setw(2) << std::setfill('0') << qq << ".txt";
+
+    std::ofstream file(fname.str());
+    if (file.is_open()) {
+        file << memory.renderSnapshot(ts.str());
     }
 }
 
