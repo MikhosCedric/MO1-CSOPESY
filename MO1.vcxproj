@@ -129,12 +129,15 @@
     <ClCompile Include="Process.cpp" />
     <ClCompile Include="Scheduler.cpp" />
     <ClCompile Include="ScreenManager.cpp" />
+    <ClCompile Include="PagingAllocator.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ConfigManager.h" />
     <ClInclude Include="ConsoleManager.h" />
+    <ClInclude Include="IMemoryAllocator.h" />
     <ClInclude Include="Process.h" />
     <ClInclude Include="Scheduler.h" />
+    <ClInclude Include="PagingAllocator.h" />
     <ClInclude Include="ScreenManager.h" />
   </ItemGroup>
   <ItemGroup>

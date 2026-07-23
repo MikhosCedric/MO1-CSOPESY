@@ -201,7 +201,8 @@ void ConsoleManager::handleScreen(const std::string& input) {
                 return;
             }
             auto proc = std::make_unique<Process>(name,
-                scheduler->getConfig().minIns, scheduler->getConfig().maxIns);
+                scheduler->getConfig().minIns, scheduler->getConfig().maxIns,
+                scheduler->getConfig().memorySize, scheduler->getConfig().pageSize);
             scheduler->addProcess(std::move(proc));
         }
         screenMgr.attachToProcess(name);

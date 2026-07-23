@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <chrono>
+#include "PagingAllocator.h"
 
 enum class Opcode {
     PRINT, DECLARE, ADD, SUBTRACT, SLEEP, FOR
@@ -49,7 +50,9 @@ public:
     int sleepRemaining;
     std::vector<ForContext> forStack;
 
-    Process(const std::string& name, uint32_t minIns, uint32_t maxIns);
+    PagingAllocator memoryAllocator;
+
+    Process(const std::string& name, uint32_t minIns, uint32_t maxIns, size_t memorySize, size_t pageSize);
 
     bool isFinished() const;
     std::string getTimestamp() const;

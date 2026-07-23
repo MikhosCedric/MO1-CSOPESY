@@ -59,6 +59,12 @@ Config ConfigManager::parse(const std::string& path) {
         else if (key == "delay-per-exec") {
             config.delayPerExec = static_cast<uint32_t>(std::stoul(valStr));
         }
+        else if (key == "memory-size") {
+            config.memorySize = static_cast<uint32_t>(std::stoul(valStr));
+        }
+        else if (key == "page-size") {
+            config.pageSize = static_cast<uint32_t>(std::stoul(valStr));
+        }
     }
 
     return config;
@@ -83,6 +89,14 @@ bool ConfigManager::validate(const Config& config) {
     }
     if (config.minIns < 1 || config.maxIns < config.minIns) {
         std::cerr << "Error: invalid min-ins/max-ins range" << std::endl;
+        return false;
+    }
+    if (config.memorySize < 1) {
+        std::cerr << "Error: memory-size must be at least 1" << std::endl;
+        return false;
+    }
+    if (config.pageSize < 1 || config.memorySize % config.pageSize != 0) {
+        std::cerr << "Error: page-size must be >= 1 and evenly divide memory-size" << std::endl;
         return false;
     }
     return true;

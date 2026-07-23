@@ -12,7 +12,7 @@ static std::mt19937& rng() {
     return instance;
 }
 
-Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns)
+Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns, size_t memorySize, size_t pageSize)
     : name(name)
     , id(nextId++)
     , state(ProcessState::READY)
@@ -20,6 +20,7 @@ Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns)
     , totalLines(0)
     , attachedCore(-1)
     , sleepRemaining(0)
+    , memoryAllocator(id, memorySize, pageSize)
 {
     auto now = std::chrono::system_clock::now();
     auto t = std::chrono::system_clock::to_time_t(now);

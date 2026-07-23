@@ -10,6 +10,8 @@ struct Config {
     uint32_t minIns = 0;
     uint32_t maxIns = 0;
     uint32_t delayPerExec = 0;
+    uint32_t memorySize = 0;
+    uint32_t pageSize = 0;
 };
 
 class ConfigManager {

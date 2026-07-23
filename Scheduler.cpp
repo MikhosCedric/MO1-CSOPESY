@@ -96,7 +96,7 @@ void Scheduler::generateBatchProcess() {
     batchCounter++;
     std::ostringstream oss;
     oss << "p" << std::setw(2) << std::setfill('0') << batchCounter;
-    auto proc = std::make_unique<Process>(oss.str(), config.minIns, config.maxIns);
+    auto proc = std::make_unique<Process>(oss.str(), config.minIns, config.maxIns, config.memorySize, config.pageSize);
     Process* raw = proc.get();
     allProcs.push_back(std::move(proc));
     readyQueue.push_back(raw);

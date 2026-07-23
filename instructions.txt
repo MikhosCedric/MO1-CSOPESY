@@ -1,0 +1,57 @@
+# Context and Instructions
+Please help me complete the following assignment for my OS emulator. Below are the preliminaries, the provided base interface code, and the list of questions I need to answer. 
+
+## Preliminaries
+* Get the latest working copy of your OS emulator.
+* It is strongly advised that you create a separate branch for this activity.
+
+## Provided Code (`IMemoryAllocator` Interface)
+```cpp
+class IMemoryAllocator
+{
+public:
+    enum MemoryAllocatorType
+    {
+        FLAT_MEMORY_ALLOCATOR,
+        PAGING,
+    };
+    virtual void* allocate(size_t size) = 0;
+    virtual void deallocate(void* ptr) = 0;
+    virtual String visualizeMemory() = 0;
+
+protected:
+    MemoryAllocatorType memoryAllocatorType;
+    struct MemoryBlock {
+        size_t start;
+        size_t size;
+
+        bool operator<(const MemoryBlock& other) const {
+            return start < other.start;
+        }
+    };
+
+    size_t maximumSize;
+    size_t currentAllocatedSize;
+};
+
+Questions to Answer  
+
+1. Show how your memory manager class can be implemented with an "IMemoryAllocator" interface that contains the following code above.  
+
+2. The memory manager class must specifically implement a paging implementation. Discuss how your paging implementation is implemented, with the allocate and deallocate functions.  
+
+3. What is the role of the MemoryBlock, and would this be wise to use in a paging environment? Yes/no, then provide an explanation and alternative implementation, if applicable.  
+
+4. Specifically, point to where exactly in your memory manager class the backing store implementation will be implemented, and justify why.
+
+5. Given a "void* ptr" reference, how does your memory manager map this pointer back to its corresponding Page Table Entry (PTE) and physical frame to successfully free the memory?
+
+6. Explain how internal fragmentation occurs in a paging environment.
+
+7. Describe where in your code, will num-paged-in and num-paged-out be tallied.
+
+8. In your OS emulator, the page table is likely implemented as a simple flat array or a single-level lookup map. Research and explain why the Linux kernel uses a multi-level structure instead of a single flat page table array for a 64-bit architecture. Go to the Linux kernel on GitHub and point exactly to which code, lines of code, depict the multi-page implementation.
+
+9. Identify/enumerate codes from the Linux kernel that resemble the MemoryBlock implementation from the OS emulator. Explain the codes you selected from the Linux kernel, and why they are related to the MemoryBlock implementation.
+
+10. Check the following function from the Linux kernel and explain what it does: static int walk_pud_range(p4d_t p4d, unsigned long addr, unsigned long end, struct mm_walk walk)
