@@ -5,6 +5,7 @@
 #include <utility>
 #include "Process.h"
 #include "ConfigManager.h"
+#include "MemoryManager.h"
 
 class Scheduler {
 public:
@@ -25,8 +26,12 @@ public:
     Config getConfig() const;
 
 private:
+    void generateMemorySnapshot(uint64_t tick);
+
     Config config;
     uint32_t quantum;
+
+    MemoryManager memory;
 
     std::vector<std::unique_ptr<Process>> allProcs;
     std::vector<Process*> readyQueue;

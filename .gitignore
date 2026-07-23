@@ -367,6 +367,11 @@ FodyWeavers.xsd
 stdin
 stdout.txt
 csopesy-log.txt
+
+# Memory-manager snapshot output (generated at runtime)
+/log/
+memory_stamp_*.txt
+
 classSpecs.txt
 specs.txt
 num5.txt
