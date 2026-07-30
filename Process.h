@@ -35,6 +35,7 @@ struct Instruction {
     uint16_t val2 = 0;
     uint16_t val3 = 0;
     uint32_t addr = 0; // READ/WRITE target; 32-bit so out-of-range literals survive
+    bool literalSet = false; // PRINT was given explicit content, even if empty
     std::vector<Instruction> body;
 };
 
@@ -114,6 +115,14 @@ public:
     std::vector<ForContext> forStack;
 
     Process(const std::string& name, uint32_t minIns, uint32_t maxIns, uint32_t memorySize);
+
+    // screen -c: a process running a user-supplied instruction list.
+    Process(const std::string& name, std::vector<Instruction> instructions, uint32_t memorySize);
+
+    // Parse a semicolon-separated instruction string (screen -c) into top-level
+    // instructions. Returns false if any instruction is malformed; the caller
+    // checks the 1-50 count against out.size().
+    static bool parseInstructions(const std::string& text, std::vector<Instruction>& out);
 
     // True once the process can no longer be scheduled - normal completion or
     // an access violation. The scheduler drains both the same way; use

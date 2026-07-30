@@ -34,3 +34,9 @@ Remaining: Phase 5 (`process-smi` / `vmstat` off the allocator's stats getters),
 `Scheduler` counts idle/active ticks per core per tick (verified exact at `num-cpu` 1 and 128) and re-exports the allocator's memory and paging counters.
 Main-menu `process-smi` and `vmstat` added to `ConsoleManager`, laid out to match the spec's mockups — the attached-screen `process-smi` is untouched and still separate.
 Remaining: Phase 6 (`screen -s <mem_size>`, `screen -c`, the instruction parser, and the `screen -r` violation branch).
+
+## 2026-07-30 — Phase 6
+
+`screen -s` now requires a memory size and `screen -c` takes 1–50 quoted instructions; both reject with the spec's exact `invalid memory allocation` / `invalid command`, and `screen -r` reports the violation line for a process killed by a bad address.
+Real instruction parser lives in `Process.cpp` beside `generateInstructions` (depth-aware `;` splitting, so `FOR([...], n)` bodies nest) — the spec's worked example prints `Result: 15` end to end.
+All six phases are in; plan.md's 12-item checklist passes. Remaining: Phase 0 repo hygiene (delete the `MO1-CSOPESY/` stub, retire `MemoryManager`), README.txt, and the PPT.

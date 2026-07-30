@@ -4,6 +4,7 @@
 #include <random>
 #include <algorithm>
 #include <ctime>
+#include <cctype>
 
 uint32_t Process::nextId = 1;
 
@@ -32,6 +33,13 @@ Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns, uint
     totalLines = instructions.size();
 }
 
+Process::Process(const std::string& name, std::vector<Instruction> instructions, uint32_t memorySize)
+    : Process(name, 0, 0, memorySize) // rolls an empty instruction list, replaced below
+{
+    this->instructions = std::move(instructions);
+    totalLines = this->instructions.size();
+}
+
 bool Process::isFinished() const {
     return state == ProcessState::FINISHED || state == ProcessState::TERMINATED;
 }
@@ -51,7 +59,8 @@ std::string Process::getCoreString() const {
 
 std::string Process::getViolationAddressHex() const {
     std::ostringstream oss;
-    oss << "0x" << std::hex << violationAddress;
+    // Uppercase digits, so an address echoes back the way a user writes it.
+    oss << "0x" << std::uppercase << std::hex << violationAddress;
     return oss.str();
 }
 
@@ -231,7 +240,7 @@ ExecResult Process::advance(IProcessMemory& mem) {
 void Process::executeInstruction(const Instruction& instr, IProcessMemory& mem) {
     switch (instr.opcode) {
     case Opcode::PRINT: {
-        std::string base = instr.arg1.empty()
+        std::string base = (instr.arg1.empty() && !instr.literalSet)
             ? "Hello world from " + name + "!"
             : instr.arg1;
         if (!instr.arg2.empty()) {
@@ -371,6 +380,212 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
     }
 
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// Instruction parsing (screen -c)
+// ---------------------------------------------------------------------------
+static std::string trimText(const std::string& s) {
+    const size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return "";
+    const size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
+static uint16_t clampParsed(uint32_t value) {
+    return static_cast<uint16_t>(value > 65535 ? 65535 : value);
+}
+
+static std::string toUpperText(const std::string& s) {
+    std::string out = s;
+    for (char& c : out) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return out;
+}
+
+// Split on `sep`, but only at nesting depth zero, so a separator inside (), []
+// or a quoted string stays put. FOR bodies nest, hence the depth tracking.
+static std::vector<std::string> splitTopLevel(const std::string& s, char sep) {
+    std::vector<std::string> out;
+    std::string cur;
+    int depth = 0;
+    bool inQuotes = false;
+
+    for (char c : s) {
+        if (c == '"') inQuotes = !inQuotes;
+        if (!inQuotes) {
+            if (c == '(' || c == '[') depth++;
+            else if (c == ')' || c == ']') depth--;
+            else if (c == sep && depth == 0) {
+                out.push_back(cur);
+                cur.clear();
+                continue;
+            }
+        }
+        cur += c;
+    }
+    out.push_back(cur);
+    return out;
+}
+
+static std::vector<std::string> tokenize(const std::string& s) {
+    std::istringstream iss(s);
+    std::vector<std::string> out;
+    std::string tok;
+    while (iss >> tok) out.push_back(tok);
+    return out;
+}
+
+static bool parseUintText(const std::string& tok, uint32_t& out) {
+    if (tok.empty()) return false;
+    for (char c : tok) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+    }
+    try { out = static_cast<uint32_t>(std::stoul(tok)); }
+    catch (const std::out_of_range&) { out = UINT32_MAX; }
+    catch (...) { return false; }
+    return true;
+}
+
+// A memory address, in the spec's 0x-prefixed hexadecimal form. An address too
+// large for uint32 saturates rather than failing, so it still reaches the
+// bounds check and reports as an access violation instead of a parse error.
+static bool parseHexAddress(const std::string& tok, uint32_t& out) {
+    if (tok.size() < 3) return false;
+    if (tok[0] != '0' || (tok[1] != 'x' && tok[1] != 'X')) return false;
+    for (size_t i = 2; i < tok.size(); i++) {
+        if (!std::isxdigit(static_cast<unsigned char>(tok[i]))) return false;
+    }
+    try { out = static_cast<uint32_t>(std::stoul(tok.substr(2), nullptr, 16)); }
+    catch (const std::out_of_range&) { out = UINT32_MAX; }
+    catch (...) { return false; }
+    return true;
+}
+
+// An operand that is either a variable name or a uint16 literal.
+static void parseOperand(const std::string& tok, std::string& argOut, uint16_t& valOut) {
+    uint32_t n = 0;
+    if (parseUintText(tok, n)) {
+        argOut.clear();
+        valOut = clampParsed(n);
+    }
+    else {
+        argOut = tok;
+        valOut = 0;
+    }
+}
+
+static bool parseOne(const std::string& text, Instruction& out);
+
+static bool parseList(const std::string& text, std::vector<Instruction>& out) {
+    for (const std::string& piece : splitTopLevel(text, ';')) {
+        const std::string one = trimText(piece);
+        if (one.empty()) continue; // tolerate a trailing or doubled semicolon
+        Instruction instr;
+        if (!parseOne(one, instr)) return false;
+        out.push_back(std::move(instr));
+    }
+    return true;
+}
+
+// PRINT("literal"), PRINT("literal" + var), PRINT(var), PRINT()
+static bool parsePrint(const std::string& inside, Instruction& out) {
+    out.opcode = Opcode::PRINT;
+
+    const std::string body = trimText(inside);
+    if (body.empty()) return true; // PRINT() keeps the default message
+
+    out.literalSet = true;
+    for (const std::string& piece : splitTopLevel(body, '+')) {
+        const std::string part = trimText(piece);
+        if (part.empty()) continue;
+        if (part.size() >= 2 && part.front() == '"' && part.back() == '"') {
+            out.arg1 = part.substr(1, part.size() - 2);
+        }
+        else {
+            out.arg2 = part;
+        }
+    }
+    return true;
+}
+
+// FOR([<instructions>], <repeats>)
+static bool parseFor(const std::string& inside, Instruction& out) {
+    const std::vector<std::string> parts = splitTopLevel(inside, ',');
+    if (parts.size() != 2) return false;
+
+    const std::string body = trimText(parts[0]);
+    if (body.size() < 2 || body.front() != '[' || body.back() != ']') return false;
+
+    uint32_t repeats = 0;
+    if (!parseUintText(trimText(parts[1]), repeats) || repeats == 0) return false;
+
+    out.opcode = Opcode::FOR;
+    out.val1 = clampParsed(repeats);
+    return parseList(body.substr(1, body.size() - 2), out.body) && !out.body.empty();
+}
+
+static bool parseOne(const std::string& text, Instruction& out) {
+    const std::string s = trimText(text);
+    if (s.empty()) return false;
+
+    // The keyword runs up to the first space or opening parenthesis.
+    const size_t k = s.find_first_of(" \t(");
+    const std::string op = toUpperText(k == std::string::npos ? s : s.substr(0, k));
+    const std::string rest = (k == std::string::npos) ? "" : trimText(s.substr(k));
+
+    if (op == "PRINT") {
+        if (rest.empty()) { out.opcode = Opcode::PRINT; return true; }
+        if (rest.size() < 2 || rest.front() != '(' || rest.back() != ')') return false;
+        return parsePrint(rest.substr(1, rest.size() - 2), out);
+    }
+    if (op == "FOR") {
+        if (rest.size() < 2 || rest.front() != '(' || rest.back() != ')') return false;
+        return parseFor(rest.substr(1, rest.size() - 2), out);
+    }
+
+    const std::vector<std::string> tok = tokenize(rest);
+
+    if (op == "DECLARE") {
+        uint32_t v = 0;
+        if (tok.size() != 2 || !parseUintText(tok[1], v)) return false;
+        out.opcode = Opcode::DECLARE;
+        out.arg1 = tok[0];
+        out.val1 = clampParsed(v);
+        return true;
+    }
+    if (op == "ADD" || op == "SUBTRACT") {
+        if (tok.size() != 3) return false;
+        out.opcode = (op == "ADD") ? Opcode::ADD : Opcode::SUBTRACT;
+        out.arg1 = tok[0];
+        parseOperand(tok[1], out.arg2, out.val2);
+        parseOperand(tok[2], out.arg3, out.val3);
+        return true;
+    }
+    if (op == "SLEEP") {
+        uint32_t v = 0;
+        if (tok.size() != 1 || !parseUintText(tok[0], v)) return false;
+        out.opcode = Opcode::SLEEP;
+        out.val1 = clampParsed(v);
+        return true;
+    }
+    if (op == "READ") {
+        if (tok.size() != 2 || !parseHexAddress(tok[1], out.addr)) return false;
+        out.opcode = Opcode::READ;
+        out.arg1 = tok[0];
+        return true;
+    }
+    if (op == "WRITE") {
+        if (tok.size() != 2 || !parseHexAddress(tok[0], out.addr)) return false;
+        out.opcode = Opcode::WRITE;
+        parseOperand(tok[1], out.arg1, out.val1);
+        return true;
+    }
+
+    return false;
+}
+
+bool Process::parseInstructions(const std::string& text, std::vector<Instruction>& out) {
+    return parseList(text, out);
 }
 
 std::string Process::generateVariableName() {

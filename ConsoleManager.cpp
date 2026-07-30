@@ -186,17 +186,58 @@ void ConsoleManager::processMainCommand(const std::string& input) {
     }
 }
 
+// A process memory size as typed at the prompt. Anything that is not a plain
+// number, or is outside the spec's [2^6, 2^16] powers of two, is rejected the
+// same way - the console only ever reports "invalid memory allocation".
+static bool parseMemorySize(const std::string& token, uint64_t& out) {
+    if (token.empty()) return false;
+    for (char c : token) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+    }
+    try { out = std::stoull(token); }
+    catch (...) { return false; } // too large to be a valid size anyway
+    return ConfigManager::isValidMemSize(out);
+}
+
 void ConsoleManager::handleScreen(const std::string& input) {
     std::istringstream iss(input);
-    std::string cmd, flag, name;
+    std::string cmd, flag, name, sizeToken;
     iss >> cmd >> flag;
 
-    if (flag == "-s") {
-        iss >> name;
-        if (name.empty()) {
-            std::cout << "Usage: screen -s <process_name>" << std::endl;
+    if (flag == "-s" || flag == "-c") {
+        iss >> name >> sizeToken;
+        if (name.empty() || sizeToken.empty()) {
+            std::cout << (flag == "-s"
+                ? "Usage: screen -s <process_name> <process_memory_size>"
+                : "Usage: screen -c <process_name> <process_memory_size> \"<instructions>\"")
+                << std::endl;
             return;
         }
+
+        uint64_t memSize = 0;
+        if (!parseMemorySize(sizeToken, memSize)) {
+            std::cout << "invalid memory allocation" << std::endl;
+            return;
+        }
+
+        // screen -c carries a quoted instruction list; it runs from the first
+        // quote to the last, since PRINT literals are quoted too.
+        std::vector<Instruction> instructions;
+        if (flag == "-c") {
+            const size_t open = input.find('"');
+            const size_t close = input.rfind('"');
+            if (open == std::string::npos || close <= open) {
+                std::cout << "invalid command" << std::endl;
+                return;
+            }
+            if (!Process::parseInstructions(input.substr(open + 1, close - open - 1),
+                                            instructions)
+                || instructions.empty() || instructions.size() > 50) {
+                std::cout << "invalid command" << std::endl;
+                return;
+            }
+        }
+
         {
             std::lock_guard<std::mutex> lock(schedulerMutex);
             auto existing = scheduler->getAllProcesses();
@@ -206,12 +247,23 @@ void ConsoleManager::handleScreen(const std::string& input) {
                 std::cout << "Process " << name << " already exists." << std::endl;
                 return;
             }
-            // Phase 6 replaces this with the required <mem_size> argument.
-            auto proc = std::make_unique<Process>(name,
-                scheduler->getConfig().minIns, scheduler->getConfig().maxIns,
-                scheduler->getConfig().maxMemPerProc);
+
+            auto proc = (flag == "-c")
+                ? std::make_unique<Process>(name, std::move(instructions),
+                                            static_cast<uint32_t>(memSize))
+                : std::make_unique<Process>(name,
+                                            scheduler->getConfig().minIns,
+                                            scheduler->getConfig().maxIns,
+                                            static_cast<uint32_t>(memSize));
             scheduler->addProcess(std::move(proc));
         }
+
+        if (flag == "-c") {
+            // Stay on the main menu so the user can watch it run.
+            std::cout << "Process " << name << " created." << std::endl;
+            return;
+        }
+
         screenMgr.attachToProcess(name);
         system("cls");
         std::cout << "Process " << name << " created. Switched to process screen." << std::endl;
@@ -225,6 +277,18 @@ void ConsoleManager::handleScreen(const std::string& input) {
         {
             std::lock_guard<std::mutex> lock(schedulerMutex);
             auto procs = scheduler->getAllProcesses();
+
+            // A process killed by an access violation reports how it died.
+            auto dead = std::find_if(procs.begin(), procs.end(),
+                [&](Process* p) { return p->name == name && p->isTerminated(); });
+            if (dead != procs.end()) {
+                std::cout << "Process " << name
+                    << " shut down due to memory access violation error that occurred at "
+                    << (*dead)->violationTime << ". "
+                    << (*dead)->getViolationAddressHex() << " invalid." << std::endl;
+                return;
+            }
+
             auto it = std::find_if(procs.begin(), procs.end(),
                 [&](Process* p) { return p->name == name && !p->isFinished(); });
             if (it != procs.end()) {
@@ -241,7 +305,9 @@ void ConsoleManager::handleScreen(const std::string& input) {
         handleScreenLS();
     }
     else {
-        std::cout << "Usage: screen -s <name> | screen -r <name> | screen -ls" << std::endl;
+        std::cout << "Usage: screen -s <name> <mem_size>"
+                     " | screen -c <name> <mem_size> \"<instructions>\""
+                     " | screen -r <name> | screen -ls" << std::endl;
     }
 }
 
