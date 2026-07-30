@@ -14,11 +14,18 @@ struct Config {
     // MO2 (part 2) memory-manager parameters.
     uint32_t maxOverallMem = 0;
     uint32_t memPerFrame = 0;
-    uint32_t memPerProc = 0;
+    uint32_t minMemPerProc = 0;
+    uint32_t maxMemPerProc = 0;
 };
 
 class ConfigManager {
 public:
     static Config parse(const std::string& path);
     static bool validate(const Config& config);
+
+    // Every memory size in MO2 is a power of two in [2^6, 2^16] = [64, 65536].
+    // Shared by config validation and by screen -s / screen -c, so the two can
+    // never drift apart. Takes uint64_t so an oversized literal typed at the
+    // prompt is rejected instead of wrapping.
+    static bool isValidMemSize(uint64_t value);
 };

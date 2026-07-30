@@ -200,8 +200,10 @@ void ConsoleManager::handleScreen(const std::string& input) {
                 std::cout << "Process " << name << " already exists." << std::endl;
                 return;
             }
+            // Phase 6 replaces this with the required <mem_size> argument.
             auto proc = std::make_unique<Process>(name,
-                scheduler->getConfig().minIns, scheduler->getConfig().maxIns);
+                scheduler->getConfig().minIns, scheduler->getConfig().maxIns,
+                scheduler->getConfig().maxMemPerProc);
             scheduler->addProcess(std::move(proc));
         }
         screenMgr.attachToProcess(name);

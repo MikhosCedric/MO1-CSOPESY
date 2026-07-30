@@ -5,12 +5,29 @@
 #include <fstream>
 #include <chrono>
 #include <ctime>
+#include <random>
 #include <direct.h>
+
+// Roll a per-process memory size from [min-mem-per-proc, max-mem-per-proc].
+// Every memory size in the spec is a power of two, so the interval is sampled
+// by exponent rather than uniformly over the bytes.
+static uint32_t rollMemorySize(uint32_t minMem, uint32_t maxMem) {
+    static std::mt19937 rng(static_cast<unsigned>(std::time(nullptr)));
+
+    uint32_t lo = 0, hi = 0;
+    while ((1u << lo) < minMem) lo++;
+    while ((1u << hi) < maxMem) hi++;
+
+    std::uniform_int_distribution<uint32_t> dist(lo, hi);
+    return 1u << dist(rng);
+}
 
 Scheduler::Scheduler(const Config& config)
     : config(config)
     , quantum(config.scheduler == "rr" ? config.quantumCycles : 0)
-    , memory(config.maxOverallMem, config.memPerFrame, config.memPerProc)
+    // The flat allocator takes one fixed block size; use the upper bound of the
+    // per-process roll until Phase 3 retires it in favour of PagingAllocator.
+    , memory(config.maxOverallMem, config.memPerFrame, config.maxMemPerProc)
     , batchCounter(0)
 {
     cores.resize(config.numCpu, nullptr);
@@ -146,7 +163,8 @@ void Scheduler::generateBatchProcess() {
     batchCounter++;
     std::ostringstream oss;
     oss << "p" << std::setw(2) << std::setfill('0') << batchCounter;
-    auto proc = std::make_unique<Process>(oss.str(), config.minIns, config.maxIns);
+    auto proc = std::make_unique<Process>(oss.str(), config.minIns, config.maxIns,
+        rollMemorySize(config.minMemPerProc, config.maxMemPerProc));
     Process* raw = proc.get();
     allProcs.push_back(std::move(proc));
     readyQueue.push_back(raw);

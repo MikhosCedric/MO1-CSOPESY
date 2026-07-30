@@ -65,12 +65,20 @@ Config ConfigManager::parse(const std::string& path) {
         else if (key == "mem-per-frame") {
             config.memPerFrame = static_cast<uint32_t>(std::stoul(valStr));
         }
-        else if (key == "mem-per-proc") {
-            config.memPerProc = static_cast<uint32_t>(std::stoul(valStr));
+        else if (key == "min-mem-per-proc") {
+            config.minMemPerProc = static_cast<uint32_t>(std::stoul(valStr));
+        }
+        else if (key == "max-mem-per-proc") {
+            config.maxMemPerProc = static_cast<uint32_t>(std::stoul(valStr));
         }
     }
 
     return config;
+}
+
+bool ConfigManager::isValidMemSize(uint64_t value) {
+    if (value < 64 || value > 65536) return false;
+    return (value & (value - 1)) == 0; // power of two
 }
 
 bool ConfigManager::validate(const Config& config) {
@@ -94,16 +102,28 @@ bool ConfigManager::validate(const Config& config) {
         std::cerr << "Error: invalid min-ins/max-ins range" << std::endl;
         return false;
     }
-    if (config.maxOverallMem < 1) {
-        std::cerr << "Error: max-overall-mem must be at least 1" << std::endl;
+    if (!isValidMemSize(config.maxOverallMem)) {
+        std::cerr << "Error: max-overall-mem must be a power of two in [64, 65536]" << std::endl;
         return false;
     }
-    if (config.memPerFrame < 1 || config.maxOverallMem % config.memPerFrame != 0) {
+    if (!isValidMemSize(config.memPerFrame)) {
+        std::cerr << "Error: mem-per-frame must be a power of two in [64, 65536]" << std::endl;
+        return false;
+    }
+    if (!isValidMemSize(config.minMemPerProc)) {
+        std::cerr << "Error: min-mem-per-proc must be a power of two in [64, 65536]" << std::endl;
+        return false;
+    }
+    if (!isValidMemSize(config.maxMemPerProc)) {
+        std::cerr << "Error: max-mem-per-proc must be a power of two in [64, 65536]" << std::endl;
+        return false;
+    }
+    if (config.maxOverallMem % config.memPerFrame != 0) {
         std::cerr << "Error: mem-per-frame must divide max-overall-mem" << std::endl;
         return false;
     }
-    if (config.memPerProc < 1 || config.memPerProc > config.maxOverallMem) {
-        std::cerr << "Error: mem-per-proc must be between 1 and max-overall-mem" << std::endl;
+    if (config.minMemPerProc > config.maxMemPerProc) {
+        std::cerr << "Error: min-mem-per-proc must not exceed max-mem-per-proc" << std::endl;
         return false;
     }
     return true;

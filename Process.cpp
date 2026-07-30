@@ -12,13 +12,15 @@ static std::mt19937& rng() {
     return instance;
 }
 
-Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns)
+Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns, uint32_t memorySize)
     : name(name)
     , id(nextId++)
     , state(ProcessState::READY)
     , currentLine(0)
     , totalLines(0)
     , attachedCore(-1)
+    , memorySize(memorySize)
+    , memoryImage(memorySize, 0)
     , sleepRemaining(0)
 {
     auto now = std::chrono::system_clock::now();
@@ -27,12 +29,16 @@ Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns)
     oss << std::put_time(std::localtime(&t), "%Y-%m-%d %H:%M:%S");
     creationTime = oss.str();
 
-    instructions = generateInstructions(minIns, maxIns, 0);
+    instructions = generateInstructions(minIns, maxIns, memorySize, 0);
     totalLines = instructions.size();
 }
 
 bool Process::isFinished() const {
-    return state == ProcessState::FINISHED;
+    return state == ProcessState::FINISHED || state == ProcessState::TERMINATED;
+}
+
+bool Process::isTerminated() const {
+    return state == ProcessState::TERMINATED;
 }
 
 std::string Process::getTimestamp() const {
@@ -42,6 +48,65 @@ std::string Process::getTimestamp() const {
 std::string Process::getCoreString() const {
     if (attachedCore < 0) return "None";
     return "Core " + std::to_string(attachedCore);
+}
+
+std::string Process::getViolationAddressHex() const {
+    std::ostringstream oss;
+    oss << "0x" << std::hex << violationAddress;
+    return oss.str();
+}
+
+bool Process::resolveVariable(const std::string& name, uint32_t& offset) {
+    auto it = symbolTable.find(name);
+    if (it != symbolTable.end()) {
+        offset = it->second;
+        return true;
+    }
+    // Symbol table full: the declaration is silently ignored (spec).
+    if (symbolTable.size() >= MAX_VARIABLES) return false;
+
+    offset = static_cast<uint32_t>(symbolTable.size()) * 2;
+    symbolTable[name] = static_cast<uint16_t>(offset);
+    return true;
+}
+
+uint16_t Process::readVariable(const std::string& name) {
+    uint32_t offset;
+    if (!resolveVariable(name, offset)) return 0;
+    return readWord(offset);
+}
+
+void Process::writeVariable(const std::string& name, uint16_t value) {
+    uint32_t offset;
+    if (!resolveVariable(name, offset)) return;
+    writeWord(offset, value);
+}
+
+bool Process::isValidAddress(uint32_t addr) const {
+    return static_cast<uint64_t>(addr) + 2 <= memorySize;
+}
+
+uint16_t Process::readWord(uint32_t addr) const {
+    return static_cast<uint16_t>(memoryImage[addr]
+        | (static_cast<uint16_t>(memoryImage[addr + 1]) << 8));
+}
+
+void Process::writeWord(uint32_t addr, uint16_t value) {
+    memoryImage[addr] = static_cast<uint8_t>(value & 0xFF);
+    memoryImage[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+}
+
+void Process::raiseViolation(uint32_t addr) {
+    violationAddress = addr;
+
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::ostringstream oss;
+    oss << std::put_time(std::localtime(&t), "%H:%M:%S");
+    violationTime = oss.str();
+
+    state = ProcessState::TERMINATED;
+    attachedCore = -1;
 }
 
 const Instruction* Process::getCurrentInstruction() const {
@@ -97,54 +162,53 @@ void Process::advanceLine() {
     }
 }
 
-bool Process::advance() {
-    if (isFinished()) return false;
+ExecResult Process::advance() {
+    if (isFinished()) return ExecResult::COMPLETED;
 
     const Instruction* instr = getCurrentInstruction();
     if (!instr) {
         if (forStack.empty()) {
             state = ProcessState::FINISHED;
         }
-        return false;
+        return ExecResult::COMPLETED;
     }
 
     if (instr->opcode == Opcode::FOR) {
         if (forStack.empty()) currentLine++;
         pushForContext(instr);
-        return true;
+        return ExecResult::COMPLETED;
     }
 
     if (instr->opcode == Opcode::SLEEP) {
         sleepRemaining = static_cast<int>(instr->val1);
         advanceLine();
-        return true;
+        return ExecResult::COMPLETED;
     }
 
-    executeInstruction(*instr);
+    ExecResult result = executeInstruction(*instr);
+
+    // Neither a fault nor a violation consumes the line: on PAGE_FAULT the
+    // allocator services the fault and this same instruction is retried, and on
+    // VIOLATION the process is already dead.
+    if (result != ExecResult::COMPLETED) return result;
+
     advanceLine();
 
     if (currentLine >= instructions.size() && forStack.empty()) {
         state = ProcessState::FINISHED;
     }
 
-    return true;
+    return ExecResult::COMPLETED;
 }
 
-bool Process::executeInstruction(const Instruction& instr) {
+ExecResult Process::executeInstruction(const Instruction& instr) {
     switch (instr.opcode) {
     case Opcode::PRINT: {
         std::string base = instr.arg1.empty()
             ? "Hello world from " + name + "!"
             : instr.arg1;
         if (!instr.arg2.empty()) {
-            auto it = variables.find(instr.arg2);
-            if (it != variables.end()) {
-                base += std::to_string(it->second);
-            }
-            else {
-                variables.try_emplace(instr.arg2, 0);
-                base += "0";
-            }
+            base += std::to_string(readVariable(instr.arg2));
         }
         auto now = std::chrono::system_clock::now();
         auto t = std::chrono::system_clock::to_time_t(now);
@@ -152,60 +216,48 @@ bool Process::executeInstruction(const Instruction& instr) {
         oss << "(" << std::put_time(std::localtime(&t), "%m/%d/%Y %I:%M:%S%p") << ") "
             << "Core:" << attachedCore << " \"" << base << "\"";
         logs.push_back(oss.str());
-        return true;
+        return ExecResult::COMPLETED;
     }
     case Opcode::DECLARE: {
-        variables[instr.arg1] = instr.val1;
-        return true;
+        writeVariable(instr.arg1, instr.val1);
+        return ExecResult::COMPLETED;
     }
     case Opcode::ADD: {
-        variables.try_emplace(instr.arg1, 0);
-        uint16_t v2;
-        if (instr.arg2.empty()) {
-            v2 = instr.val2;
-        }
-        else {
-            variables.try_emplace(instr.arg2, 0);
-            v2 = variables[instr.arg2];
-        }
-        uint16_t v3;
-        if (instr.arg3.empty()) {
-            v3 = instr.val3;
-        }
-        else {
-            variables.try_emplace(instr.arg3, 0);
-            v3 = variables[instr.arg3];
-        }
-        variables[instr.arg1] = clampUint16(static_cast<int64_t>(v2) + v3);
-        return true;
+        uint16_t v2 = instr.arg2.empty() ? instr.val2 : readVariable(instr.arg2);
+        uint16_t v3 = instr.arg3.empty() ? instr.val3 : readVariable(instr.arg3);
+        writeVariable(instr.arg1, clampUint16(static_cast<int64_t>(v2) + v3));
+        return ExecResult::COMPLETED;
     }
     case Opcode::SUBTRACT: {
-        variables.try_emplace(instr.arg1, 0);
-        uint16_t v2;
-        if (instr.arg2.empty()) {
-            v2 = instr.val2;
+        uint16_t v2 = instr.arg2.empty() ? instr.val2 : readVariable(instr.arg2);
+        uint16_t v3 = instr.arg3.empty() ? instr.val3 : readVariable(instr.arg3);
+        writeVariable(instr.arg1, clampUint16(static_cast<int64_t>(v2) - v3));
+        return ExecResult::COMPLETED;
+    }
+    case Opcode::READ: {
+        if (!isValidAddress(instr.addr)) {
+            raiseViolation(instr.addr);
+            return ExecResult::VIOLATION;
         }
-        else {
-            variables.try_emplace(instr.arg2, 0);
-            v2 = variables[instr.arg2];
+        writeVariable(instr.arg1, readWord(instr.addr));
+        return ExecResult::COMPLETED;
+    }
+    case Opcode::WRITE: {
+        if (!isValidAddress(instr.addr)) {
+            raiseViolation(instr.addr);
+            return ExecResult::VIOLATION;
         }
-        uint16_t v3;
-        if (instr.arg3.empty()) {
-            v3 = instr.val3;
-        }
-        else {
-            variables.try_emplace(instr.arg3, 0);
-            v3 = variables[instr.arg3];
-        }
-        variables[instr.arg1] = clampUint16(static_cast<int64_t>(v2) - v3);
-        return true;
+        uint16_t value = instr.arg1.empty() ? instr.val1 : readVariable(instr.arg1);
+        writeWord(instr.addr, value);
+        return ExecResult::COMPLETED;
     }
     default:
-        return false;
+        return ExecResult::COMPLETED;
     }
 }
 
-std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t maxIns, uint32_t depth) {
+std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t maxIns,
+                                                       uint32_t memorySize, uint32_t depth) {
     std::vector<Instruction> result;
     std::uniform_int_distribution<uint32_t> countDist(minIns, maxIns);
     std::uniform_int_distribution<int> typeDist(0, 9);
@@ -214,6 +266,14 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
     std::uniform_int_distribution<int> repeatDist(2, 5);
     std::uniform_int_distribution<int> concatDist(0, 2);
     std::uniform_int_distribution<int> rareDist(0, 4);
+
+    // Generated READ/WRITE addresses stay inside the user-addressable space and
+    // 2-byte aligned, so batch processes exercise paging without dying on a
+    // violation. A process with no room above the symbol table gets none.
+    const bool canAddress = memorySize >= SYMBOL_TABLE_BYTES + 2;
+    std::uniform_int_distribution<uint32_t> wordDist(SYMBOL_TABLE_BYTES / 2,
+                                                     canAddress ? (memorySize - 2) / 2
+                                                                : SYMBOL_TABLE_BYTES / 2);
 
     uint32_t count = countDist(rng());
 
@@ -226,10 +286,10 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
             instr.val1 = static_cast<uint16_t>(repeatDist(rng()));
             uint32_t bodyMin = 1;
             uint32_t bodyMax = 3;
-            instr.body = generateInstructions(bodyMin, bodyMax, depth + 1);
+            instr.body = generateInstructions(bodyMin, bodyMax, memorySize, depth + 1);
         }
         else {
-            int subType = type % 6;
+            int subType = type % 8; // type is 0..7 here; 6 and 7 are READ/WRITE
             switch (subType) {
             case 0:
             case 1:
@@ -260,6 +320,26 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
                 if (rareDist(rng()) == 0) {
                     instr.opcode = Opcode::SLEEP;
                     instr.val1 = static_cast<uint16_t>(sleepDist(rng()));
+                }
+                else {
+                    instr.opcode = Opcode::PRINT;
+                }
+                break;
+            case 6:
+                if (canAddress) {
+                    instr.opcode = Opcode::READ;
+                    instr.arg1 = generateVariableName();
+                    instr.addr = wordDist(rng()) * 2;
+                }
+                else {
+                    instr.opcode = Opcode::PRINT;
+                }
+                break;
+            case 7:
+                if (canAddress) {
+                    instr.opcode = Opcode::WRITE;
+                    instr.arg1 = generateVariableName();
+                    instr.addr = wordDist(rng()) * 2;
                 }
                 else {
                     instr.opcode = Opcode::PRINT;
