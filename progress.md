@@ -46,3 +46,9 @@ All six phases are in; plan.md's 12-item checklist passes. Remaining: Phase 0 re
 Deleted the dead `MO1-CSOPESY/` stub project and its `.slnx`, leaving `MO1.sln` as the single entry point, and retired `MemoryManager.{h,cpp}` + `IMemoryAllocator.h` now that `PagingAllocator` is the only allocator.
 Dropped their `MO1.vcxproj` / `.filters` entries; clean rebuild is 8 source files and the app still passes the smoke test. `CLAUDE.md`'s State section updated to match.
 Remaining: `README.txt` (names, run instructions, entry file) and the PPT.
+
+## 2026-07-30 — README.txt
+
+Added the `README.txt` deliverable: authors, entry class file (`main.cpp` → `ConsoleManager::run()`), build/run steps, the config and command reference, and the runtime files.
+Documents the working-directory gotcha (`config.txt` is read from the CWD, so running `x64\Debug\MO1.exe` from its own folder fails to initialize) — verified, along with the `Result: 15` example as typed.
+Remaining: the PPT.
