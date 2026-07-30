@@ -40,3 +40,9 @@ Remaining: Phase 6 (`screen -s <mem_size>`, `screen -c`, the instruction parser,
 `screen -s` now requires a memory size and `screen -c` takes 1–50 quoted instructions; both reject with the spec's exact `invalid memory allocation` / `invalid command`, and `screen -r` reports the violation line for a process killed by a bad address.
 Real instruction parser lives in `Process.cpp` beside `generateInstructions` (depth-aware `;` splitting, so `FOR([...], n)` bodies nest) — the spec's worked example prints `Result: 15` end to end.
 All six phases are in; plan.md's 12-item checklist passes. Remaining: Phase 0 repo hygiene (delete the `MO1-CSOPESY/` stub, retire `MemoryManager`), README.txt, and the PPT.
+
+## 2026-07-30 — Phase 0 (hygiene)
+
+Deleted the dead `MO1-CSOPESY/` stub project and its `.slnx`, leaving `MO1.sln` as the single entry point, and retired `MemoryManager.{h,cpp}` + `IMemoryAllocator.h` now that `PagingAllocator` is the only allocator.
+Dropped their `MO1.vcxproj` / `.filters` entries; clean rebuild is 8 source files and the app still passes the smoke test. `CLAUDE.md`'s State section updated to match.
+Remaining: `README.txt` (names, run instructions, entry file) and the PPT.
