@@ -166,7 +166,7 @@ static bool touchesSymbolTable(const Instruction& instr) {
 }
 
 ExecResult Process::ensureResident(const Instruction& instr, IProcessMemory& mem) {
-    mem.beginInstruction();
+    mem.beginInstruction(id, static_cast<uint32_t>(currentLine));
 
     bool resident = true;
 

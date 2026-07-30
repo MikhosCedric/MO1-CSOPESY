@@ -55,8 +55,10 @@ class IProcessMemory {
 public:
     virtual ~IProcessMemory() = default;
 
-    // Releases the pins held by the previous instruction attempt.
-    virtual void beginInstruction() = 0;
+    // Releases the pins held by the previous instruction attempt, and records
+    // the line the process is on - the command counter written to the backing
+    // store, which is what makes a swapped-out process resumable.
+    virtual void beginInstruction(uint32_t pid, uint32_t commandCounter) = 0;
 
     // Make the pages backing [addr, addr + len) resident and pin them. Returns
     // false when a fault had to be serviced, in which case the caller must

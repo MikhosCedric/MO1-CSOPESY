@@ -373,7 +373,7 @@ csopesy-log.txt
 memory_stamp_*.txt
 
 # Demand-paging swap area (generated at runtime)
-/backing_store/
+csopesy-backing-store.txt
 
 classSpecs.txt
 specs.txt

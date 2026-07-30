@@ -1,75 +1,116 @@
 #include "BackingStore.h"
 
-#include <filesystem>
+#include <algorithm>
 #include <fstream>
-#include <sstream>
 
-namespace fs = std::filesystem;
-
-BackingStore::BackingStore(const std::string& directory)
-    : dir(directory)
+BackingStore::BackingStore(const std::string& path)
+    : path(path)
 {
-    // Ensure the swap directory exists (relative to the emulator's path).
-    std::error_code ec;
-    fs::create_directories(dir, ec);
 }
 
-std::string BackingStore::pathFor(uint32_t pid, uint32_t vpn) const {
-    std::ostringstream oss;
-    oss << dir << "/proc_" << pid << "_page_" << vpn << ".txt";
-    return oss.str();
+BackingStore::~BackingStore() {
+    // Leave the file reflecting the final state of the run.
+    writeFile();
+}
+
+void BackingStore::addProcess(uint32_t pid, const std::string& name, uint32_t memorySize,
+                              uint32_t numPages, uint32_t pageSize) {
+    Record rec;
+    rec.name = name;
+    rec.memorySize = memorySize;
+    rec.numPages = numPages;
+    procs[pid] = rec;
+
+    // Every page starts swapped out and zero-filled.
+    const std::vector<uint8_t> blank(pageSize, 0);
+    for (uint32_t vpn = 0; vpn < numPages; ++vpn) {
+        pages[{ pid, vpn }] = blank;
+    }
+    dirty = true;
+}
+
+void BackingStore::removeProcess(uint32_t pid) {
+    procs.erase(pid);
+
+    for (auto it = pages.begin(); it != pages.end(); ) {
+        it = (it->first.first == pid) ? pages.erase(it) : std::next(it);
+    }
+    dirty = true;
+}
+
+void BackingStore::setCommandCounter(uint32_t pid, uint32_t line) {
+    auto it = procs.find(pid);
+    if (it == procs.end() || it->second.commandCounter == line) return;
+    it->second.commandCounter = line;
+    dirty = true;
 }
 
 void BackingStore::store(uint32_t pid, uint32_t vpn, const std::vector<uint8_t>& data) {
-    // Write the page as human-readable text: a header followed by the byte
-    // values. Text form keeps the store inspectable, matching the notes'
-    // "text files ... must contain necessary process info" guidance.
-    std::ofstream out(pathFor(pid, vpn), std::ios::trunc);
-    if (!out) return;
-    out << "pid " << pid << "\n";
-    out << "page " << vpn << "\n";
-    out << "bytes " << data.size() << "\n";
-    for (size_t i = 0; i < data.size(); ++i) {
-        out << static_cast<int>(data[i]);
-        out << ((i + 1 < data.size()) ? ' ' : '\n');
-    }
-    out.flush(); // a grader will open the store mid-run
+    pages[{ pid, vpn }] = data;
+    dirty = true;
 }
 
 std::vector<uint8_t> BackingStore::load(uint32_t pid, uint32_t vpn) const {
-    std::ifstream in(pathFor(pid, vpn));
-    std::vector<uint8_t> data;
-    if (!in) return data;
-
-    std::string tag;
-    size_t discard = 0;
-    size_t count = 0;
-    in >> tag >> discard;    // pid   <id>
-    in >> tag >> discard;    // page  <vpn>
-    in >> tag >> count;      // bytes <count>
-    data.reserve(count);
-    for (size_t i = 0; i < count; ++i) {
-        int value = 0;
-        if (!(in >> value)) break;
-        data.push_back(static_cast<uint8_t>(value));
-    }
-    return data;
+    auto it = pages.find({ pid, vpn });
+    if (it == pages.end()) return {};
+    return it->second;
 }
 
 void BackingStore::remove(uint32_t pid, uint32_t vpn) {
-    std::error_code ec;
-    fs::remove(pathFor(pid, vpn), ec);
-}
-
-bool BackingStore::contains(uint32_t pid, uint32_t vpn) const {
-    std::error_code ec;
-    return fs::exists(pathFor(pid, vpn), ec);
+    if (pages.erase({ pid, vpn }) > 0) dirty = true;
 }
 
 void BackingStore::clear() {
-    std::error_code ec;
-    if (!fs::exists(dir, ec)) return;
-    for (const auto& entry : fs::directory_iterator(dir, ec)) {
-        fs::remove(entry.path(), ec);
+    procs.clear();
+    pages.clear();
+    dirty = false;
+    writeFile();
+}
+
+void BackingStore::flushIfDirty() {
+    if (!dirty) return;
+    dirty = false;
+    writeFile();
+}
+
+void BackingStore::writeFile() const {
+    std::ofstream out(path, std::ios::trunc);
+    if (!out) return;
+
+    out << "CSOPESY BACKING STORE\n";
+    out << "Processes: " << procs.size() << "\n";
+    out << "Pages swapped out: " << pages.size() << "\n";
+    out << "A page listed as <zeroed> holds nothing but zero bytes.\n";
+
+    for (const auto& entry : procs) {
+        const uint32_t pid = entry.first;
+        const Record& rec = entry.second;
+
+        out << "\n[process"
+            << " id=" << pid
+            << " name=" << rec.name
+            << " memory-size=" << rec.memorySize
+            << " num-pages=" << rec.numPages
+            << " command-counter=" << rec.commandCounter
+            << "]\n";
+
+        // Pages of this process, in page order (the map is keyed (pid, vpn)).
+        for (auto it = pages.lower_bound({ pid, 0 });
+             it != pages.end() && it->first.first == pid; ++it) {
+            const std::vector<uint8_t>& bytes = it->second;
+
+            out << "page " << it->first.second << ": ";
+            if (std::all_of(bytes.begin(), bytes.end(),
+                            [](uint8_t b) { return b == 0; })) {
+                out << "<zeroed>\n";
+                continue;
+            }
+            for (size_t i = 0; i < bytes.size(); ++i) {
+                out << static_cast<int>(bytes[i]);
+                out << ((i + 1 < bytes.size()) ? ' ' : '\n');
+            }
+        }
     }
+
+    out.flush();
 }

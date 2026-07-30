@@ -9,7 +9,7 @@ PagingAllocator::PagingAllocator(uint32_t maxOverallMem, uint32_t frameSize)
     , numFrames(frameSize == 0 ? 0 : maxOverallMem / frameSize)
     , physicalMemory(static_cast<size_t>(numFrames) * frameSize, 0)
     , frameTable(numFrames)
-    , backingStore("backing_store")
+    , backingStore("csopesy-backing-store.txt")
 {
     for (uint32_t f = 0; f < numFrames; ++f) {
         freeFrameList.push_back(f);
@@ -36,10 +36,7 @@ void PagingAllocator::createProcess(uint32_t pid, const std::string& name, uint3
     pm.memorySize = memorySize;
     pm.pageTable.resize(numPages); // every PTE present = false
 
-    const std::vector<uint8_t> blank(frameSize, 0);
-    for (uint32_t vpn = 0; vpn < numPages; ++vpn) {
-        backingStore.store(pid, vpn, blank);
-    }
+    backingStore.addProcess(pid, name, memorySize, numPages, frameSize);
 
     processes.emplace(pid, std::move(pm));
 }
@@ -61,21 +58,20 @@ void PagingAllocator::destroyProcess(uint32_t pid) {
             pinnedFrames.erase(std::remove(pinnedFrames.begin(), pinnedFrames.end(), frame),
                                pinnedFrames.end());
         }
-        else {
-            // Swapped out: reclaim its page in the store.
-            backingStore.remove(pid, vpn);
-        }
         pte.present = false;
     }
 
+    // Drops the process's record and every page it still had swapped out.
+    backingStore.removeProcess(pid);
     processes.erase(it);
 }
 
 // ---------------------------------------------------------------------------
 // IProcessMemory
 // ---------------------------------------------------------------------------
-void PagingAllocator::beginInstruction() {
+void PagingAllocator::beginInstruction(uint32_t pid, uint32_t commandCounter) {
     pinnedFrames.clear();
+    backingStore.setCommandCounter(pid, commandCounter);
 }
 
 bool PagingAllocator::ensureResident(uint32_t pid, uint32_t addr, uint32_t len) {

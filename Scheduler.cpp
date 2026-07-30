@@ -122,6 +122,9 @@ void Scheduler::onTick(uint64_t tick) {
     if (quantum > 0 && tick % quantum == 0) {
         generateMemorySnapshot(tick);
     }
+
+    // Keep csopesy-backing-store.txt current for anyone reading it mid-run.
+    memory.flushBackingStore();
 }
 
 void Scheduler::generateMemorySnapshot(uint64_t tick) {

@@ -22,3 +22,9 @@ Unblocks Phase 3 (allocator returns `PAGE_FAULT`); `screen -s <mem_size>` and th
 `PagingAllocator` rewritten for true demand paging: per-process page tables, lazy `createProcess` (all pages invalid, written to the backing store at creation), FIFO eviction with the faulting instruction's frames pinned.
 `Scheduler` now owns it instead of `MemoryManager` — memory is built at process creation, dispatch never blocks on it, and `destroyProcess` runs on completion and violation alike.
 Remaining: Phase 4 collapses the swap directory into `csopesy-backing-store.txt`; Phase 5 reads the new stats getters for `process-smi` / `vmstat`.
+
+## 2026-07-30 — Phase 4
+
+`BackingStore` is now one readable `csopesy-backing-store.txt`: a record per live process (id, name, memory size, page count, command counter) followed by its swapped-out pages and their bytes.
+State is authoritative in memory and the file is rewritten once per scheduler tick when dirty — rewriting inside each page-out was quadratic (~13k page records in a 20s batch run); dropping per-page file I/O made the emulator measurably faster.
+Remaining: Phase 5 (`process-smi` / `vmstat` off the allocator's stats getters), Phase 6 (command surface).

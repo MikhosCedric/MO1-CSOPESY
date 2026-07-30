@@ -51,7 +51,7 @@ public:
     void destroyProcess(uint32_t pid);
 
     // --- IProcessMemory (the MMU step) -------------------------------------
-    void beginInstruction() override;
+    void beginInstruction(uint32_t pid, uint32_t commandCounter) override;
     bool ensureResident(uint32_t pid, uint32_t addr, uint32_t len) override;
     uint16_t readWord(uint32_t pid, uint32_t addr) override;
     void writeWord(uint32_t pid, uint32_t addr, uint16_t value) override;
@@ -71,6 +71,10 @@ public:
 
     // ASCII snapshot of the frame table (the log/memory_stamp_NN.txt dump).
     std::string renderSnapshot(const std::string& timestamp) const;
+
+    // Rewrite csopesy-backing-store.txt if it has fallen behind. Called once
+    // per scheduler tick.
+    void flushBackingStore() { backingStore.flushIfDirty(); }
 
 private:
     // One page table entry. The "present" (valid/invalid) bit is what demand
