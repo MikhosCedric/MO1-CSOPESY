@@ -1,239 +1,250 @@
 #include "PagingAllocator.h"
 
 #include <algorithm>
-#include <limits>
+#include <iomanip>
 #include <sstream>
 
-PagingAllocator::PagingAllocator(size_t maxOverallMem, size_t frameSize,
-                                 const std::string& backingDir)
+PagingAllocator::PagingAllocator(uint32_t maxOverallMem, uint32_t frameSize)
     : frameSize(frameSize)
     , numFrames(frameSize == 0 ? 0 : maxOverallMem / frameSize)
-    , physicalMemory(numFrames * frameSize, 0)
+    , physicalMemory(static_cast<size_t>(numFrames) * frameSize, 0)
     , frameTable(numFrames)
-    , nextBackingPageId(1)
-    , backingStore(backingDir)
+    , backingStore("backing_store")
 {
-    memoryAllocatorType = PAGING;
-    maximumSize = numFrames * frameSize;
-    currentAllocatedSize = 0;
-
-    // All frames start free; the free-frame list is a simple FIFO queue.
-    for (size_t f = 0; f < numFrames; ++f) {
+    for (uint32_t f = 0; f < numFrames; ++f) {
         freeFrameList.push_back(f);
     }
-
-    // Virtual address 0 is reserved so a valid allocation is never confused
-    // with nullptr (our failure sentinel). Start the virtual space one page in.
-    nextVirtualAddress = frameSize;
 
     // Start from a clean swap area each run.
     backingStore.clear();
 }
 
 // ---------------------------------------------------------------------------
-// allocate: round the request up to whole pages, guarantee enough free frames
-// (paging others out if necessary), then map each virtual page to a frame.
+// createProcess: lazy allocation. Build the page table with every page invalid
+// and push the whole (zero-filled) address space out to the backing store. No
+// frame is taken - the first reference to each page faults it in.
 // ---------------------------------------------------------------------------
-void* PagingAllocator::allocate(size_t size) {
-    if (size == 0 || frameSize == 0) return nullptr;
+void PagingAllocator::createProcess(uint32_t pid, const std::string& name, uint32_t memorySize) {
+    if (frameSize == 0 || memorySize == 0) return;
+    if (processes.count(pid)) return;
 
-    size_t numPages = (size + frameSize - 1) / frameSize;       // ceil division
-    if (numPages > numFrames) return nullptr;                    // never fits
+    uint32_t numPages = (memorySize + frameSize - 1) / frameSize; // ceil division
 
-    size_t internalFrag = numPages * frameSize - size;           // padding (Q5)
+    ProcessMemory pm;
+    pm.pid = pid;
+    pm.name = name;
+    pm.memorySize = memorySize;
+    pm.pageTable.resize(numPages); // every PTE present = false
 
-    // Make room: evict until we have enough free frames, or give up.
-    while (freeFrameList.size() < numPages) {
-        if (!evictOneFrame()) return nullptr;
+    const std::vector<uint8_t> blank(frameSize, 0);
+    for (uint32_t vpn = 0; vpn < numPages; ++vpn) {
+        backingStore.store(pid, vpn, blank);
     }
 
-    Allocation alloc;
-    alloc.base = nextVirtualAddress;
-    alloc.size = size;
-    alloc.numPages = numPages;
-    alloc.internalFragmentation = internalFrag;
-    alloc.pageTable.resize(numPages);
-
-    // Advance the virtual bump pointer past this (page-aligned) allocation.
-    nextVirtualAddress += numPages * frameSize;
-
-    for (size_t vpn = 0; vpn < numPages; ++vpn) {
-        size_t frame = freeFrameList.front();
-        freeFrameList.pop_front();
-
-        PageTableEntry& pte = alloc.pageTable[vpn];
-        pte.frameNumber = frame;
-        pte.present = true;
-        pte.backingPageId = nextBackingPageId++;
-
-        frameTable[frame] = FrameOwner{ alloc.base, vpn };
-        fifoFrames.push_back(frame);
-    }
-
-    currentAllocatedSize += numPages * frameSize;
-    totalInternalFragmentation += internalFrag;
-
-    void* handle = reinterpret_cast<void*>(alloc.base);
-    allocations.emplace(alloc.base, std::move(alloc));
-    return handle;
+    processes.emplace(pid, std::move(pm));
 }
 
-// ---------------------------------------------------------------------------
-// deallocate: map the pointer back to its allocation, return every resident
-// frame to the free list, and drop any swapped-out pages from the store.
-// ---------------------------------------------------------------------------
-void PagingAllocator::deallocate(void* ptr) {
-    if (ptr == nullptr) return;
+void PagingAllocator::destroyProcess(uint32_t pid) {
+    auto it = processes.find(pid);
+    if (it == processes.end()) return;
 
-    size_t vaddr = reinterpret_cast<size_t>(ptr);
-    Allocation* alloc = findAllocation(vaddr);
-    if (!alloc) return;   // invalid / double free -> ignore
-
-    for (PageTableEntry& pte : alloc->pageTable) {
+    ProcessMemory& pm = it->second;
+    for (uint32_t vpn = 0; vpn < pm.pageTable.size(); ++vpn) {
+        PageTableEntry& pte = pm.pageTable[vpn];
         if (pte.present) {
-            // Resident page: hand its frame back to the free-frame list.
-            size_t frame = pte.frameNumber;
-            frameTable[frame] = FrameOwner{ 0, 0 };
+            // Resident: hand the frame back.
+            uint32_t frame = pte.frameNumber;
+            frameTable[frame] = FrameOwner{};
             freeFrameList.push_back(frame);
             fifoFrames.erase(std::remove(fifoFrames.begin(), fifoFrames.end(), frame),
                              fifoFrames.end());
-        } else {
-            // Swapped-out page: reclaim its file in the backing store.
-            backingStore.remove(pte.backingPageId);
+            pinnedFrames.erase(std::remove(pinnedFrames.begin(), pinnedFrames.end(), frame),
+                               pinnedFrames.end());
+        }
+        else {
+            // Swapped out: reclaim its page in the store.
+            backingStore.remove(pid, vpn);
         }
         pte.present = false;
     }
 
-    currentAllocatedSize -= alloc->numPages * frameSize;
-    if (totalInternalFragmentation >= alloc->internalFragmentation)
-        totalInternalFragmentation -= alloc->internalFragmentation;
-
-    allocations.erase(alloc->base);
+    processes.erase(it);
 }
 
 // ---------------------------------------------------------------------------
-// translate: virtual pointer -> physical byte address (the MMU step).
-//   virtual page number = (vaddr - base) / frameSize   (high-order bits)
-//   page offset         = (vaddr - base) % frameSize   (low-order bits)
-// Faults the page in from the backing store when it is not resident.
+// IProcessMemory
 // ---------------------------------------------------------------------------
-size_t PagingAllocator::translate(void* ptr) {
-    size_t vaddr = reinterpret_cast<size_t>(ptr);
-    Allocation* alloc = findAllocation(vaddr);
-    if (!alloc) return std::numeric_limits<size_t>::max();
-
-    size_t vpn = (vaddr - alloc->base) / frameSize;
-    size_t offset = (vaddr - alloc->base) % frameSize;
-    if (vpn >= alloc->pageTable.size())
-        return std::numeric_limits<size_t>::max();
-
-    PageTableEntry& pte = alloc->pageTable[vpn];
-    if (!pte.present) {
-        pageIn(*alloc, vpn);   // page fault -> demand-page it in
-    }
-    return pte.frameNumber * frameSize + offset;
+void PagingAllocator::beginInstruction() {
+    pinnedFrames.clear();
 }
 
-// ---------------------------------------------------------------------------
-// visualizeMemory: readable snapshot of frames + paging statistics.
-// ---------------------------------------------------------------------------
-String PagingAllocator::visualizeMemory() {
-    std::ostringstream oss;
-    oss << "=== Paging Memory Snapshot ===\n";
-    oss << "Frame size    : " << frameSize << " bytes\n";
-    oss << "Total frames  : " << numFrames
-        << "  (" << maximumSize << " bytes)\n";
-    oss << "Used / Free   : " << getUsedFrameCount()
-        << " / " << getFreeFrameCount() << "\n";
-    oss << "Paged in      : " << numPagedIn << "\n";
-    oss << "Paged out     : " << numPagedOut << "\n";
-    oss << "Internal frag : " << totalInternalFragmentation << " bytes\n";
-    oss << "------------------------------\n";
-    oss << "Frame  Owner(base:vpn)\n";
-    for (size_t f = 0; f < numFrames; ++f) {
-        oss << f << "\t";
-        const FrameOwner& owner = frameTable[f];
-        bool free = std::find(freeFrameList.begin(), freeFrameList.end(), f)
-                    != freeFrameList.end();
-        if (free) {
-            oss << "(free)";
-        } else {
-            oss << "0x" << std::hex << owner.base << std::dec
-                << ":" << owner.vpn;
+bool PagingAllocator::ensureResident(uint32_t pid, uint32_t addr, uint32_t len) {
+    auto it = processes.find(pid);
+    if (it == processes.end() || len == 0) return true;
+    ProcessMemory& pm = it->second;
+
+    // Page number = high-order bits of the address, offset = low-order bits.
+    // A 2-byte word straddling a page boundary needs both pages.
+    uint32_t firstVpn = addr / frameSize;
+    uint32_t lastVpn = (addr + len - 1) / frameSize;
+
+    bool faulted = false;
+    for (uint32_t vpn = firstVpn; vpn <= lastVpn && vpn < pm.pageTable.size(); ++vpn) {
+        if (!pm.pageTable[vpn].present) {
+            pageIn(pm, vpn);
+            faulted = true; // the instruction restarts whether or not a frame was won
         }
-        oss << "\n";
+        if (pm.pageTable[vpn].present) {
+            pinnedFrames.push_back(pm.pageTable[vpn].frameNumber);
+        }
     }
+
+    return !faulted;
+}
+
+uint16_t PagingAllocator::readWord(uint32_t pid, uint32_t addr) {
+    const uint8_t* lo = byteAt(pid, addr);
+    const uint8_t* hi = byteAt(pid, addr + 1);
+    if (!lo || !hi) return 0; // not resident: uninitialised memory reads as 0
+    return static_cast<uint16_t>(*lo | (static_cast<uint16_t>(*hi) << 8));
+}
+
+void PagingAllocator::writeWord(uint32_t pid, uint32_t addr, uint16_t value) {
+    uint8_t* lo = byteAt(pid, addr);
+    uint8_t* hi = byteAt(pid, addr + 1);
+    if (!lo || !hi) return;
+    *lo = static_cast<uint8_t>(value & 0xFF);
+    *hi = static_cast<uint8_t>((value >> 8) & 0xFF);
+}
+
+// ---------------------------------------------------------------------------
+// Statistics
+// ---------------------------------------------------------------------------
+uint32_t PagingAllocator::getUsedMemory() const {
+    return static_cast<uint32_t>((numFrames - freeFrameList.size()) * frameSize);
+}
+
+uint32_t PagingAllocator::getFreeMemory() const {
+    return static_cast<uint32_t>(freeFrameList.size() * frameSize);
+}
+
+uint32_t PagingAllocator::getResidentMemory(uint32_t pid) const {
+    auto it = processes.find(pid);
+    if (it == processes.end()) return 0;
+
+    uint32_t pages = 0;
+    for (const PageTableEntry& pte : it->second.pageTable) {
+        if (pte.present) pages++;
+    }
+    return pages * frameSize;
+}
+
+std::string PagingAllocator::renderSnapshot(const std::string& timestamp) const {
+    std::ostringstream oss;
+    oss << "Timestamp: (" << timestamp << ")\n";
+    oss << "Number of processes in memory: " << processes.size() << "\n";
+    oss << "Frame size: " << frameSize << " bytes\n";
+    oss << "Frames used / total: " << (numFrames - freeFrameList.size())
+        << " / " << numFrames << "\n";
+    oss << "Pages paged in: " << numPagedIn << "\n";
+    oss << "Pages paged out: " << numPagedOut << "\n";
+    oss << "----start---- = " << getTotalMemory() << "\n";
+
+    for (uint32_t f = 0; f < numFrames; ++f) {
+        const FrameOwner& owner = frameTable[f];
+        if (!owner.used) continue;
+
+        auto it = processes.find(owner.pid);
+        oss << f * frameSize << "\t"
+            << (it != processes.end() ? it->second.name : std::string("?"))
+            << "  page " << owner.vpn << "\n";
+    }
+
+    oss << "----end---- = 0\n";
     return oss.str();
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-PagingAllocator::Allocation* PagingAllocator::findAllocation(size_t vaddr) {
-    if (allocations.empty()) return nullptr;
+uint8_t* PagingAllocator::byteAt(uint32_t pid, uint32_t addr) {
+    auto it = processes.find(pid);
+    if (it == processes.end()) return nullptr;
+    ProcessMemory& pm = it->second;
 
-    // Largest base <= vaddr, then range-check against that allocation's span.
-    auto it = allocations.upper_bound(vaddr);
-    if (it == allocations.begin()) return nullptr;
-    --it;
+    uint32_t vpn = addr / frameSize;
+    if (vpn >= pm.pageTable.size()) return nullptr;
 
-    Allocation& a = it->second;
-    size_t end = a.base + a.numPages * frameSize;
-    if (vaddr >= a.base && vaddr < end) return &a;
-    return nullptr;
+    const PageTableEntry& pte = pm.pageTable[vpn];
+    if (!pte.present) return nullptr;
+
+    return &physicalMemory[static_cast<size_t>(pte.frameNumber) * frameSize
+                           + (addr % frameSize)];
 }
 
 bool PagingAllocator::evictOneFrame() {
-    // FIFO victim: the oldest still-resident frame.
-    while (!fifoFrames.empty()) {
-        size_t frame = fifoFrames.front();
-        fifoFrames.pop_front();
+    // FIFO victim: the oldest resident frame that is not pinned by the
+    // instruction currently being serviced.
+    for (auto it = fifoFrames.begin(); it != fifoFrames.end(); ++it) {
+        uint32_t frame = *it;
+
+        if (std::find(pinnedFrames.begin(), pinnedFrames.end(), frame) != pinnedFrames.end()) {
+            continue; // never evict a page the faulting instruction is about to use
+        }
 
         const FrameOwner owner = frameTable[frame];
-        Allocation* alloc = findAllocation(owner.base);
-        if (!alloc) continue;                 // stale entry; skip
-        if (owner.vpn >= alloc->pageTable.size()) continue;
+        auto pit = processes.find(owner.pid);
+        if (!owner.used || pit == processes.end()) {
+            fifoFrames.erase(it); // stale entry
+            frameTable[frame] = FrameOwner{};
+            freeFrameList.push_back(frame);
+            return true;
+        }
 
-        PageTableEntry& pte = alloc->pageTable[owner.vpn];
-        if (!pte.present || pte.frameNumber != frame) continue;
+        PageTableEntry& pte = pit->second.pageTable[owner.vpn];
 
-        // Copy the victim frame's bytes to the backing store (page-out).
-        std::vector<uint8_t> bytes(
-            physicalMemory.begin() + frame * frameSize,
-            physicalMemory.begin() + frame * frameSize + frameSize);
-        backingStore.store(pte.backingPageId, bytes);
+        // Page the victim's bytes out to the backing store.
+        const size_t start = static_cast<size_t>(frame) * frameSize;
+        std::vector<uint8_t> bytes(physicalMemory.begin() + start,
+                                   physicalMemory.begin() + start + frameSize);
+        backingStore.store(owner.pid, owner.vpn, bytes);
 
-        pte.present = false;                  // now lives in the backing store
-        frameTable[frame] = FrameOwner{ 0, 0 };
+        pte.present = false;
+        frameTable[frame] = FrameOwner{};
         freeFrameList.push_back(frame);
-        ++numPagedOut;                        // (Q6) page-out tally
+        fifoFrames.erase(it);
+        ++numPagedOut;
         return true;
     }
-    return false;   // nothing evictable (all frames belong to caller-in-progress)
+    return false; // every resident frame is pinned
 }
 
-void PagingAllocator::pageIn(Allocation& alloc, size_t vpn) {
-    PageTableEntry& pte = alloc.pageTable[vpn];
-    if (pte.present) return;
+bool PagingAllocator::pageIn(ProcessMemory& pm, uint32_t vpn) {
+    PageTableEntry& pte = pm.pageTable[vpn];
+    if (pte.present) return true;
 
-    // Ensure a free frame exists (evict someone else if needed).
-    if (freeFrameList.empty()) {
-        if (!evictOneFrame()) return;         // truly out of memory
+    if (freeFrameList.empty() && !evictOneFrame()) {
+        return false; // no frame can be freed this tick; the caller retries
     }
 
-    size_t frame = freeFrameList.front();
+    uint32_t frame = freeFrameList.front();
     freeFrameList.pop_front();
 
     // Restore the page's bytes from the backing store into the frame.
-    std::vector<uint8_t> bytes = backingStore.load(pte.backingPageId);
+    const size_t start = static_cast<size_t>(frame) * frameSize;
+    std::fill(physicalMemory.begin() + start,
+              physicalMemory.begin() + start + frameSize, static_cast<uint8_t>(0));
+
+    const std::vector<uint8_t> bytes = backingStore.load(pm.pid, vpn);
     for (size_t i = 0; i < frameSize && i < bytes.size(); ++i) {
-        physicalMemory[frame * frameSize + i] = bytes[i];
+        physicalMemory[start + i] = bytes[i];
     }
-    backingStore.remove(pte.backingPageId);
+    backingStore.remove(pm.pid, vpn);
 
     pte.frameNumber = frame;
     pte.present = true;
-    frameTable[frame] = FrameOwner{ alloc.base, vpn };
+    frameTable[frame] = FrameOwner{ pm.pid, vpn, true };
     fifoFrames.push_back(frame);
-    ++numPagedIn;                             // (Q6) page-in tally
+    ++numPagedIn;
+    return true;
 }

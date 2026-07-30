@@ -25,9 +25,7 @@ static uint32_t rollMemorySize(uint32_t minMem, uint32_t maxMem) {
 Scheduler::Scheduler(const Config& config)
     : config(config)
     , quantum(config.scheduler == "rr" ? config.quantumCycles : 0)
-    // The flat allocator takes one fixed block size; use the upper bound of the
-    // per-process roll until Phase 3 retires it in favour of PagingAllocator.
-    , memory(config.maxOverallMem, config.memPerFrame, config.maxMemPerProc)
+    , memory(config.maxOverallMem, config.memPerFrame)
     , batchCounter(0)
 {
     cores.resize(config.numCpu, nullptr);
@@ -54,7 +52,7 @@ void Scheduler::onTick(uint64_t tick) {
         Process* proc = cores[i];
         if (!proc) continue;
         if (proc->isFinished()) {
-            memory.free(proc->name);
+            memory.destroyProcess(proc->id);
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);
             continue;
@@ -68,11 +66,15 @@ void Scheduler::onTick(uint64_t tick) {
 
         if (coreTickCounters[i] >= static_cast<int>(config.delayPerExec)) {
             coreTickCounters[i] = 0;
-            proc->advance();
+            // A PAGE_FAULT consumes the tick without consuming the instruction:
+            // the allocator has serviced the fault and the same line runs again
+            // next tick. A VIOLATION leaves the process TERMINATED, which
+            // isFinished() reports below and frees exactly like completion.
+            proc->advance(memory);
         }
 
         if (proc->isFinished()) {
-            memory.free(proc->name);
+            memory.destroyProcess(proc->id);
             finishedQueue.push_back(proc);
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);
@@ -96,30 +98,22 @@ void Scheduler::onTick(uint64_t tick) {
     }
 
     // Phase 3: Dispatch ready processes to idle cores.
-    // A process must hold memory to run. If it isn't in memory yet, try a
-    // first-fit allocation; if memory is full, the process reverts to the tail
-    // of the ready queue (no backing store) and we try the next candidate.
+    // Under demand paging every process already owns a page table (built at
+    // creation, all pages invalid), so dispatch never has to wait for memory -
+    // the process simply faults its pages in once it is running.
     for (size_t i = 0; i < cores.size(); i++) {
         if (cores[i] != nullptr) continue;
+        if (readyQueue.empty()) break;
 
-        size_t attempts = readyQueue.size();
-        while (attempts-- > 0 && !readyQueue.empty()) {
-            Process* candidate = readyQueue.front();
-            readyQueue.erase(readyQueue.begin());
+        Process* candidate = readyQueue.front();
+        readyQueue.erase(readyQueue.begin());
 
-            if (memory.contains(candidate->name) || memory.allocate(candidate->name)) {
-                cores[i] = candidate;
-                candidate->state = ProcessState::RUNNING;
-                candidate->attachedCore = static_cast<int>(i);
-                coreTickCounters[i] = 0;
-                if (config.scheduler == "rr") {
-                    cpuQuantumCounter[candidate->id] = 0;
-                }
-                break;
-            }
-
-            // Memory full: send back to the tail of the ready queue.
-            readyQueue.push_back(candidate);
+        cores[i] = candidate;
+        candidate->state = ProcessState::RUNNING;
+        candidate->attachedCore = static_cast<int>(i);
+        coreTickCounters[i] = 0;
+        if (config.scheduler == "rr") {
+            cpuQuantumCounter[candidate->id] = 0;
         }
     }
 
@@ -156,6 +150,9 @@ void Scheduler::generateMemorySnapshot(uint64_t tick) {
 void Scheduler::addProcess(std::unique_ptr<Process> proc) {
     Process* raw = proc.get();
     allProcs.push_back(std::move(proc));
+    // Lazy allocation at creation: the page table is built with every page
+    // invalid and the pages are written to the backing store straight away.
+    memory.createProcess(raw->id, raw->name, raw->memorySize);
     readyQueue.push_back(raw);
 }
 
@@ -167,6 +164,7 @@ void Scheduler::generateBatchProcess() {
         rollMemorySize(config.minMemPerProc, config.maxMemPerProc));
     Process* raw = proc.get();
     allProcs.push_back(std::move(proc));
+    memory.createProcess(raw->id, raw->name, raw->memorySize);
     readyQueue.push_back(raw);
 }
 

@@ -2,115 +2,124 @@
 #ifndef PAGING_ALLOCATOR_H
 #define PAGING_ALLOCATOR_H
 
-#include "IMemoryAllocator.h"
+#include "Process.h"       // IProcessMemory - the fault interface
 #include "BackingStore.h"
 
 #include <cstdint>
 #include <deque>
 #include <map>
+#include <string>
 #include <vector>
 
 // ============================================================================
 // PagingAllocator
 // ----------------------------------------------------------------------------
-// A paging implementation of IMemoryAllocator.
+// Demand paging with a backing store.
 //
 // Model:
 //   * Physical memory is a flat byte array split into fixed-size FRAMES.
-//   * Each allocate() request is rounded up to a whole number of PAGES; every
-//     page is mapped to exactly one physical frame through a Page Table.
-//   * allocate() hands back a VIRTUAL base address (contiguous per allocation).
-//     The mapping virtual-page -> physical-frame is stored per allocation, so
-//     frames themselves need NOT be contiguous -> external fragmentation is
-//     eliminated, but internal fragmentation remains (last page is padded).
-//   * When no free frame exists, a victim frame is paged OUT to the BackingStore
-//     (FIFO victim policy); a later reference pages it back IN. num-paged-in /
-//     num-paged-out are tallied at exactly those two points.
+//   * Every process gets its OWN virtual space [0, memorySize) and its own page
+//     table, so memory is attributable per process (process-smi) rather than to
+//     an anonymous allocation.
+//   * createProcess() is LAZY: it builds the page table with every PTE
+//     present = false and writes all of the process's pages to the backing
+//     store. It consumes no frames. A grader opening the store right after
+//     screen -s already sees the process's pages, per the notes' "at the start
+//     of execution an active process will have all its pages in the backing
+//     store and marked as invalid".
+//   * A frame is acquired only on a fault, and faults only happen inside
+//     Process::advance(), which only runs on a CPU worker.
+//   * When no free frame exists, a FIFO victim is paged OUT; a later reference
+//     pages it back IN. num-paged-in / num-paged-out are tallied at exactly
+//     those two points.
 //
-// Why not MemoryBlock? MemoryBlock models a contiguous [start,size) hole, which
-// is the right unit for the FLAT allocator. Paging tracks fixed frames by index
-// via a free-frame list + page table, so MemoryBlock is not used for the core
-// mapping here (see the seatwork write-up, Q2).
+// Livelock guard: frames made resident during the current instruction attempt
+// are PINNED, so servicing the second of an instruction's faults can never
+// evict the first. Pins are released by the next beginInstruction().
 // ============================================================================
-class PagingAllocator : public IMemoryAllocator {
+class PagingAllocator : public IProcessMemory {
 public:
-    // maxOverallMem and frameSize are in bytes; frameSize should be a power of
-    // two and divide maxOverallMem evenly.
-    PagingAllocator(size_t maxOverallMem, size_t frameSize,
-                    const std::string& backingDir = "backing_store");
-    ~PagingAllocator() override = default;
+    // Both sizes in bytes; frameSize is a power of two dividing maxOverallMem.
+    PagingAllocator(uint32_t maxOverallMem, uint32_t frameSize);
 
-    void* allocate(size_t size) override;
-    void deallocate(void* ptr) override;
-    String visualizeMemory() override;
+    // Lazy allocation - see the class comment. Never fails: a process larger
+    // than physical memory is legal under demand paging, it simply pages.
+    void createProcess(uint32_t pid, const std::string& name, uint32_t memorySize);
 
-    // --- Address translation (the MMU step) --------------------------------
-    // Resolve a virtual pointer to its physical byte address, faulting the page
-    // in from the backing store if it is currently swapped out. Returns SIZE_MAX
-    // on an invalid reference. Exposed so the demo/tests can show translation.
-    size_t translate(void* ptr);
+    // Release every frame and backing-store page owned by pid. Called on normal
+    // completion and on an access violation alike.
+    void destroyProcess(uint32_t pid);
 
-    // --- Statistics --------------------------------------------------------
-    size_t getNumPagedIn() const { return numPagedIn; }
-    size_t getNumPagedOut() const { return numPagedOut; }
-    size_t getInternalFragmentation() const { return totalInternalFragmentation; }
-    size_t getFreeFrameCount() const { return freeFrameList.size(); }
-    size_t getUsedFrameCount() const { return numFrames - freeFrameList.size(); }
-    size_t getFrameSize() const { return frameSize; }
-    size_t getNumFrames() const { return numFrames; }
+    // --- IProcessMemory (the MMU step) -------------------------------------
+    void beginInstruction() override;
+    bool ensureResident(uint32_t pid, uint32_t addr, uint32_t len) override;
+    uint16_t readWord(uint32_t pid, uint32_t addr) override;
+    void writeWord(uint32_t pid, uint32_t addr, uint16_t value) override;
+
+    // --- Statistics (process-smi / vmstat) ---------------------------------
+    uint32_t getTotalMemory() const { return numFrames * frameSize; }
+    uint32_t getUsedMemory() const;
+    uint32_t getFreeMemory() const;
+    uint32_t getFrameSize() const { return frameSize; }
+    uint32_t getNumFrames() const { return numFrames; }
+    uint64_t getNumPagedIn() const { return numPagedIn; }
+    uint64_t getNumPagedOut() const { return numPagedOut; }
+    uint32_t getProcessCount() const { return static_cast<uint32_t>(processes.size()); }
+
+    // Bytes of pid currently held in frames - its row in process-smi.
+    uint32_t getResidentMemory(uint32_t pid) const;
+
+    // ASCII snapshot of the frame table (the log/memory_stamp_NN.txt dump).
+    std::string renderSnapshot(const std::string& timestamp) const;
 
 private:
-    // One Page Table Entry: maps a virtual page to a physical frame, plus the
-    // valid/invalid ("present") bit used by demand paging.
+    // One page table entry. The "present" (valid/invalid) bit is what demand
+    // paging turns on; when false the page's bytes live in the backing store.
     struct PageTableEntry {
-        size_t frameNumber = 0;    // physical frame, valid only when present
-        bool present = false;      // true = in RAM, false = in backing store
-        size_t backingPageId = 0;  // stable id used to name its swap file
+        uint32_t frameNumber = 0; // meaningful only while present
+        bool present = false;
     };
 
-    // Bookkeeping for one allocate() request.
-    struct Allocation {
-        size_t base = 0;                       // virtual base address (the void*)
-        size_t size = 0;                       // bytes the caller asked for
-        size_t numPages = 0;                   // pages reserved (size rounded up)
-        size_t internalFragmentation = 0;      // padding in the final page
-        std::vector<PageTableEntry> pageTable; // one PTE per virtual page
+    struct ProcessMemory {
+        uint32_t pid = 0;
+        std::string name;
+        uint32_t memorySize = 0;
+        std::vector<PageTableEntry> pageTable;
     };
 
-    // Reverse map: which allocation/virtual-page currently owns a frame.
+    // Reverse map: which (process, page) currently occupies a frame.
     struct FrameOwner {
-        size_t base = 0; // owning allocation's virtual base (0 = free)
-        size_t vpn = 0;  // virtual page number within that allocation
+        uint32_t pid = 0;
+        uint32_t vpn = 0;
+        bool used = false;
     };
 
-    // Find the allocation that owns a virtual address (base <= addr < end).
-    Allocation* findAllocation(size_t vaddr);
-
-    // Free up one frame by paging its current occupant out to disk (FIFO).
-    // Returns false if there is no evictable frame. Increments numPagedOut.
+    // Free a frame by paging its FIFO-oldest occupant out. Skips pinned frames.
+    // Returns false when every resident frame is pinned.
     bool evictOneFrame();
 
-    // Bring a swapped-out page back into a free frame. Increments numPagedIn.
-    void pageIn(Allocation& alloc, size_t vpn);
+    // Bring a swapped-out page into a free frame. Returns false if no frame
+    // could be freed for it.
+    bool pageIn(ProcessMemory& pm, uint32_t vpn);
 
-    size_t frameSize;
-    size_t numFrames;
+    // Physical byte address of a resident virtual address, or nullptr.
+    uint8_t* byteAt(uint32_t pid, uint32_t addr);
 
-    std::vector<uint8_t> physicalMemory;      // simulated RAM (numFrames*frameSize)
-    std::deque<size_t> freeFrameList;         // queue of free frame indices
-    std::vector<FrameOwner> frameTable;       // frame -> owner (for eviction)
-    std::deque<size_t> fifoFrames;            // allocation order, for FIFO victim
+    uint32_t frameSize;
+    uint32_t numFrames;
 
-    std::map<size_t, Allocation> allocations; // keyed by virtual base address
+    std::vector<uint8_t> physicalMemory; // simulated RAM (numFrames * frameSize)
+    std::deque<uint32_t> freeFrameList;  // indices of unoccupied frames
+    std::vector<FrameOwner> frameTable;  // frame -> owner
+    std::deque<uint32_t> fifoFrames;     // residency order, for the FIFO victim
+    std::vector<uint32_t> pinnedFrames;  // untouchable for this instruction
 
-    size_t nextVirtualAddress;                // bump pointer for virtual space
-    size_t nextBackingPageId;                 // unique page id generator
+    std::map<uint32_t, ProcessMemory> processes; // keyed by process id
 
     BackingStore backingStore;
 
-    size_t numPagedIn = 0;
-    size_t numPagedOut = 0;
-    size_t totalInternalFragmentation = 0;
+    uint64_t numPagedIn = 0;
+    uint64_t numPagedOut = 0;
 };
 
 #endif // PAGING_ALLOCATOR_H

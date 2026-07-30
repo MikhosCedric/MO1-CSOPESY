@@ -5,7 +5,7 @@
 #include <utility>
 #include "Process.h"
 #include "ConfigManager.h"
-#include "MemoryManager.h"
+#include "PagingAllocator.h"
 
 class Scheduler {
 public:
@@ -31,7 +31,7 @@ private:
     Config config;
     uint32_t quantum;
 
-    MemoryManager memory;
+    PagingAllocator memory;
 
     std::vector<std::unique_ptr<Process>> allProcs;
     std::vector<Process*> readyQueue;

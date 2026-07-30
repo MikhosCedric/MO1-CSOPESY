@@ -20,7 +20,6 @@ Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns, uint
     , totalLines(0)
     , attachedCore(-1)
     , memorySize(memorySize)
-    , memoryImage(memorySize, 0)
     , sleepRemaining(0)
 {
     auto now = std::chrono::system_clock::now();
@@ -70,30 +69,20 @@ bool Process::resolveVariable(const std::string& name, uint32_t& offset) {
     return true;
 }
 
-uint16_t Process::readVariable(const std::string& name) {
+uint16_t Process::readVariable(const std::string& name, IProcessMemory& mem) {
     uint32_t offset;
     if (!resolveVariable(name, offset)) return 0;
-    return readWord(offset);
+    return mem.readWord(id, offset);
 }
 
-void Process::writeVariable(const std::string& name, uint16_t value) {
+void Process::writeVariable(const std::string& name, uint16_t value, IProcessMemory& mem) {
     uint32_t offset;
     if (!resolveVariable(name, offset)) return;
-    writeWord(offset, value);
+    mem.writeWord(id, offset, value);
 }
 
 bool Process::isValidAddress(uint32_t addr) const {
     return static_cast<uint64_t>(addr) + 2 <= memorySize;
-}
-
-uint16_t Process::readWord(uint32_t addr) const {
-    return static_cast<uint16_t>(memoryImage[addr]
-        | (static_cast<uint16_t>(memoryImage[addr + 1]) << 8));
-}
-
-void Process::writeWord(uint32_t addr, uint16_t value) {
-    memoryImage[addr] = static_cast<uint8_t>(value & 0xFF);
-    memoryImage[addr + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
 }
 
 void Process::raiseViolation(uint32_t addr) {
@@ -162,7 +151,43 @@ void Process::advanceLine() {
     }
 }
 
-ExecResult Process::advance() {
+// Does this instruction read or write a variable, i.e. touch the symbol table
+// segment? The segment is a page like any other and can fault.
+static bool touchesSymbolTable(const Instruction& instr) {
+    switch (instr.opcode) {
+    case Opcode::PRINT:    return !instr.arg2.empty();
+    case Opcode::WRITE:    return !instr.arg1.empty();
+    case Opcode::DECLARE:
+    case Opcode::ADD:
+    case Opcode::SUBTRACT:
+    case Opcode::READ:     return true;
+    default:               return false;
+    }
+}
+
+ExecResult Process::ensureResident(const Instruction& instr, IProcessMemory& mem) {
+    mem.beginInstruction();
+
+    bool resident = true;
+
+    if (touchesSymbolTable(instr)) {
+        resident &= mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+    }
+
+    if (instr.opcode == Opcode::READ || instr.opcode == Opcode::WRITE) {
+        // The bounds check precedes the fault: an address outside the process's
+        // own space is a violation, not a page that could be brought in.
+        if (!isValidAddress(instr.addr)) {
+            raiseViolation(instr.addr);
+            return ExecResult::VIOLATION;
+        }
+        resident &= mem.ensureResident(id, instr.addr, 2);
+    }
+
+    return resident ? ExecResult::COMPLETED : ExecResult::PAGE_FAULT;
+}
+
+ExecResult Process::advance(IProcessMemory& mem) {
     if (isFinished()) return ExecResult::COMPLETED;
 
     const Instruction* instr = getCurrentInstruction();
@@ -185,13 +210,13 @@ ExecResult Process::advance() {
         return ExecResult::COMPLETED;
     }
 
-    ExecResult result = executeInstruction(*instr);
-
     // Neither a fault nor a violation consumes the line: on PAGE_FAULT the
-    // allocator services the fault and this same instruction is retried, and on
-    // VIOLATION the process is already dead.
-    if (result != ExecResult::COMPLETED) return result;
+    // allocator has serviced the fault and this same instruction is retried on
+    // the next tick, and on VIOLATION the process is already dead.
+    ExecResult ready = ensureResident(*instr, mem);
+    if (ready != ExecResult::COMPLETED) return ready;
 
+    executeInstruction(*instr, mem);
     advanceLine();
 
     if (currentLine >= instructions.size() && forStack.empty()) {
@@ -201,14 +226,16 @@ ExecResult Process::advance() {
     return ExecResult::COMPLETED;
 }
 
-ExecResult Process::executeInstruction(const Instruction& instr) {
+// Runs one instruction. ensureResident() has already guaranteed every page this
+// touches is present, so nothing here can fault or violate.
+void Process::executeInstruction(const Instruction& instr, IProcessMemory& mem) {
     switch (instr.opcode) {
     case Opcode::PRINT: {
         std::string base = instr.arg1.empty()
             ? "Hello world from " + name + "!"
             : instr.arg1;
         if (!instr.arg2.empty()) {
-            base += std::to_string(readVariable(instr.arg2));
+            base += std::to_string(readVariable(instr.arg2, mem));
         }
         auto now = std::chrono::system_clock::now();
         auto t = std::chrono::system_clock::to_time_t(now);
@@ -216,43 +243,35 @@ ExecResult Process::executeInstruction(const Instruction& instr) {
         oss << "(" << std::put_time(std::localtime(&t), "%m/%d/%Y %I:%M:%S%p") << ") "
             << "Core:" << attachedCore << " \"" << base << "\"";
         logs.push_back(oss.str());
-        return ExecResult::COMPLETED;
+        return;
     }
     case Opcode::DECLARE: {
-        writeVariable(instr.arg1, instr.val1);
-        return ExecResult::COMPLETED;
+        writeVariable(instr.arg1, instr.val1, mem);
+        return;
     }
     case Opcode::ADD: {
-        uint16_t v2 = instr.arg2.empty() ? instr.val2 : readVariable(instr.arg2);
-        uint16_t v3 = instr.arg3.empty() ? instr.val3 : readVariable(instr.arg3);
-        writeVariable(instr.arg1, clampUint16(static_cast<int64_t>(v2) + v3));
-        return ExecResult::COMPLETED;
+        uint16_t v2 = instr.arg2.empty() ? instr.val2 : readVariable(instr.arg2, mem);
+        uint16_t v3 = instr.arg3.empty() ? instr.val3 : readVariable(instr.arg3, mem);
+        writeVariable(instr.arg1, clampUint16(static_cast<int64_t>(v2) + v3), mem);
+        return;
     }
     case Opcode::SUBTRACT: {
-        uint16_t v2 = instr.arg2.empty() ? instr.val2 : readVariable(instr.arg2);
-        uint16_t v3 = instr.arg3.empty() ? instr.val3 : readVariable(instr.arg3);
-        writeVariable(instr.arg1, clampUint16(static_cast<int64_t>(v2) - v3));
-        return ExecResult::COMPLETED;
+        uint16_t v2 = instr.arg2.empty() ? instr.val2 : readVariable(instr.arg2, mem);
+        uint16_t v3 = instr.arg3.empty() ? instr.val3 : readVariable(instr.arg3, mem);
+        writeVariable(instr.arg1, clampUint16(static_cast<int64_t>(v2) - v3), mem);
+        return;
     }
     case Opcode::READ: {
-        if (!isValidAddress(instr.addr)) {
-            raiseViolation(instr.addr);
-            return ExecResult::VIOLATION;
-        }
-        writeVariable(instr.arg1, readWord(instr.addr));
-        return ExecResult::COMPLETED;
+        writeVariable(instr.arg1, mem.readWord(id, instr.addr), mem);
+        return;
     }
     case Opcode::WRITE: {
-        if (!isValidAddress(instr.addr)) {
-            raiseViolation(instr.addr);
-            return ExecResult::VIOLATION;
-        }
-        uint16_t value = instr.arg1.empty() ? instr.val1 : readVariable(instr.arg1);
-        writeWord(instr.addr, value);
-        return ExecResult::COMPLETED;
+        uint16_t value = instr.arg1.empty() ? instr.val1 : readVariable(instr.arg1, mem);
+        mem.writeWord(id, instr.addr, value);
+        return;
     }
     default:
-        return ExecResult::COMPLETED;
+        return;
     }
 }
 

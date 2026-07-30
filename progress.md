@@ -16,3 +16,9 @@ Read this alongside `plan.md`: `plan.md` says what is *planned*, this says what 
 Config: `mem-per-proc` split into `min`/`max-mem-per-proc`, shared `isValidMemSize` (power of two, [64, 65536]); `config.txt` updated to a spec-valid set.
 `Process` gains `memorySize`, a 64-byte symbol table (32 slots), READ/WRITE with 32-bit addresses, `TERMINATED` + violation time/address, and tri-state `advance()` so a `PAGE_FAULT` does not consume the line.
 Unblocks Phase 3 (allocator returns `PAGE_FAULT`); `screen -s <mem_size>` and the `screen -r` violation branch are still Phase 6.
+
+## 2026-07-30 — Phase 3
+
+`PagingAllocator` rewritten for true demand paging: per-process page tables, lazy `createProcess` (all pages invalid, written to the backing store at creation), FIFO eviction with the faulting instruction's frames pinned.
+`Scheduler` now owns it instead of `MemoryManager` — memory is built at process creation, dispatch never blocks on it, and `destroyProcess` runs on completion and violation alike.
+Remaining: Phase 4 collapses the swap directory into `csopesy-backing-store.txt`; Phase 5 reads the new stats getters for `process-smi` / `vmstat`.

@@ -44,9 +44,34 @@ struct ForContext {
     uint16_t remaining = 0;
 };
 
+// The memory backend a process executes against - the only coupling between the
+// process model and the paging layer. Implemented by PagingAllocator.
+//
+// One instruction attempt is: beginInstruction(), then one ensureResident() per
+// region the instruction touches, then the reads/writes. Frames made resident
+// during an attempt stay pinned until the next beginInstruction(), so bringing
+// in a second page can never evict the first.
+class IProcessMemory {
+public:
+    virtual ~IProcessMemory() = default;
+
+    // Releases the pins held by the previous instruction attempt.
+    virtual void beginInstruction() = 0;
+
+    // Make the pages backing [addr, addr + len) resident and pin them. Returns
+    // false when a fault had to be serviced, in which case the caller must
+    // restart the instruction rather than consume the line.
+    virtual bool ensureResident(uint32_t pid, uint32_t addr, uint32_t len) = 0;
+
+    // Valid only for addresses a preceding ensureResident() made resident.
+    virtual uint16_t readWord(uint32_t pid, uint32_t addr) = 0;
+    virtual void writeWord(uint32_t pid, uint32_t addr, uint16_t value) = 0;
+};
+
 // Address-space layout
 // --------------------
-// A process owns memorySize bytes, laid out as two segments:
+// A process owns memorySize bytes of its own virtual space, laid out as two
+// segments:
 //
 //   [0, 64)            symbol table segment - 32 slots of 2 bytes
 //   [64, memorySize)   user-addressable space
@@ -55,6 +80,10 @@ struct ForContext {
 // bounds-checked against the whole space, so a user address below 64 is legal
 // and aliases the symbol table - the spec only defines an out-of-space
 // reference as a violation.
+//
+// The bytes themselves live in the allocator's frames, not here: the symbol
+// table is a named segment of the process's page set and faults like any other
+// page. A process holds only its name -> offset map.
 class Process {
 public:
     static constexpr uint32_t SYMBOL_TABLE_BYTES = 64;
@@ -73,7 +102,6 @@ public:
     std::string creationTime;
 
     uint32_t memorySize;
-    std::vector<uint8_t> memoryImage;            // the process's bytes, zero-filled
     std::map<std::string, uint16_t> symbolTable; // name -> offset in the symbol segment
 
     // Set when the process dies on an access violation.
@@ -95,24 +123,27 @@ public:
     std::string getCoreString() const;
     std::string getViolationAddressHex() const;
 
-    ExecResult advance();
+    // Attempt one instruction. Called only while the process holds a CPU, so
+    // faults can only ever occur on a worker (spec).
+    ExecResult advance(IProcessMemory& mem);
 
 private:
     const Instruction* getCurrentInstruction() const;
     void pushForContext(const Instruction* forInst);
     void advanceLine();
 
-    ExecResult executeInstruction(const Instruction& instr);
+    // Bring in everything the instruction touches before running any of it, so
+    // execution itself cannot fault half-way through.
+    ExecResult ensureResident(const Instruction& instr, IProcessMemory& mem);
+    void executeInstruction(const Instruction& instr, IProcessMemory& mem);
 
     // Symbol table. resolveVariable returns false only when the table is full
     // and the name is new - the caller then silently ignores the access.
     bool resolveVariable(const std::string& name, uint32_t& offset);
-    uint16_t readVariable(const std::string& name);
-    void writeVariable(const std::string& name, uint16_t value);
+    uint16_t readVariable(const std::string& name, IProcessMemory& mem);
+    void writeVariable(const std::string& name, uint16_t value, IProcessMemory& mem);
 
     bool isValidAddress(uint32_t addr) const;
-    uint16_t readWord(uint32_t addr) const;
-    void writeWord(uint32_t addr, uint16_t value);
     void raiseViolation(uint32_t addr);
 
     static std::vector<Instruction> generateInstructions(uint32_t minIns, uint32_t maxIns,
