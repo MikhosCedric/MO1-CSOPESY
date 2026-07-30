@@ -23,6 +23,8 @@ private:
     void handleScreen(const std::string& input);
     void handleScreenLS();
     void handleReportUtil();
+    void handleProcessSMI();
+    void handleVmstat();
     std::string buildUtilReport();
 
     void backgroundTickLoop();

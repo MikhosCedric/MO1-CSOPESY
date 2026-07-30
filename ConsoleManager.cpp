@@ -175,6 +175,12 @@ void ConsoleManager::processMainCommand(const std::string& input) {
     else if (input == "report-util") {
         handleReportUtil();
     }
+    else if (input == "process-smi") {
+        handleProcessSMI();
+    }
+    else if (input == "vmstat") {
+        handleVmstat();
+    }
     else {
         std::cout << "Unknown command." << std::endl;
     }
@@ -300,6 +306,53 @@ void ConsoleManager::handleReportUtil() {
     else {
         std::cout << "Error: Could not open csopesy-log.txt" << std::endl;
     }
+}
+
+// Main-menu process-smi: the nvidia-smi-style summary from the spec mockup.
+// The attached-screen process-smi above is a different view of one process.
+void ConsoleManager::handleProcessSMI() {
+    std::lock_guard<std::mutex> lock(schedulerMutex);
+    if (!scheduler) return;
+
+    uint32_t coresUsed = scheduler->getCoresUsed();
+    uint32_t coresTotal = scheduler->getCoresTotal();
+    uint32_t cpuUtil = coresTotal > 0 ? (coresUsed * 100 / coresTotal) : 0;
+
+    uint32_t usedMem = scheduler->getUsedMemory();
+    uint32_t totalMem = scheduler->getTotalMemory();
+    uint32_t memUtil = totalMem > 0 ? (usedMem * 100 / totalMem) : 0;
+
+    std::cout << "--------------------------------------------------" << std::endl;
+    std::cout << "| PROCESS-SMI V01.00 Driver Version: 01.00 |" << std::endl;
+    std::cout << "--------------------------------------------------" << std::endl;
+    std::cout << "CPU-Util: " << cpuUtil << "%" << std::endl;
+    std::cout << "Memory Usage: " << usedMem << "B / " << totalMem << "B" << std::endl;
+    std::cout << "Memory Util: " << memUtil << "%" << std::endl;
+    std::cout << std::endl;
+    std::cout << "==================================================" << std::endl;
+    std::cout << "Running processes and memory usage:" << std::endl;
+    std::cout << "--------------------------------------------------" << std::endl;
+
+    for (auto* p : scheduler->getRunningProcesses()) {
+        std::cout << p->name << " " << scheduler->getResidentMemory(p->id) << "B" << std::endl;
+    }
+
+    std::cout << "--------------------------------------------------" << std::endl;
+}
+
+void ConsoleManager::handleVmstat() {
+    std::lock_guard<std::mutex> lock(schedulerMutex);
+    if (!scheduler) return;
+
+    const int w = 12;
+    std::cout << std::setw(w) << scheduler->getTotalMemory()  << " total memory" << std::endl;
+    std::cout << std::setw(w) << scheduler->getUsedMemory()   << " used memory" << std::endl;
+    std::cout << std::setw(w) << scheduler->getFreeMemory()   << " free memory" << std::endl;
+    std::cout << std::setw(w) << scheduler->getIdleTicks()    << " idle cpu ticks" << std::endl;
+    std::cout << std::setw(w) << scheduler->getActiveTicks()  << " active cpu ticks" << std::endl;
+    std::cout << std::setw(w) << scheduler->getTotalTicks()   << " total cpu ticks" << std::endl;
+    std::cout << std::setw(w) << scheduler->getNumPagedIn()   << " num paged in" << std::endl;
+    std::cout << std::setw(w) << scheduler->getNumPagedOut()  << " num paged out" << std::endl;
 }
 
 void ConsoleManager::backgroundTickLoop() {

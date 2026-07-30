@@ -28,3 +28,9 @@ Remaining: Phase 4 collapses the swap directory into `csopesy-backing-store.txt`
 `BackingStore` is now one readable `csopesy-backing-store.txt`: a record per live process (id, name, memory size, page count, command counter) followed by its swapped-out pages and their bytes.
 State is authoritative in memory and the file is rewritten once per scheduler tick when dirty — rewriting inside each page-out was quadratic (~13k page records in a 20s batch run); dropping per-page file I/O made the emulator measurably faster.
 Remaining: Phase 5 (`process-smi` / `vmstat` off the allocator's stats getters), Phase 6 (command surface).
+
+## 2026-07-30 — Phase 5
+
+`Scheduler` counts idle/active ticks per core per tick (verified exact at `num-cpu` 1 and 128) and re-exports the allocator's memory and paging counters.
+Main-menu `process-smi` and `vmstat` added to `ConsoleManager`, laid out to match the spec's mockups — the attached-screen `process-smi` is untouched and still separate.
+Remaining: Phase 6 (`screen -s <mem_size>`, `screen -c`, the instruction parser, and the `screen -r` violation branch).

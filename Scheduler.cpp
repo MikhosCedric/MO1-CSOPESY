@@ -33,6 +33,15 @@ Scheduler::Scheduler(const Config& config)
 }
 
 void Scheduler::onTick(uint64_t tick) {
+    // Phase 0: Tick accounting, per core, before anything is dispatched - this
+    // is the assignment the cores actually spend this tick under. A core with a
+    // process on it is active; an empty one is idle. Every core-tick falls into
+    // exactly one bucket, so idle + active == total.
+    for (Process* p : cores) {
+        if (p) activeTicks++;
+        else   idleTicks++;
+    }
+
     // Phase 1: Process sleeping queue
     for (auto it = sleepingQueue.begin(); it != sleepingQueue.end(); ) {
         it->second--;

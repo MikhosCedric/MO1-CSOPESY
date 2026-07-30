@@ -25,6 +25,21 @@ public:
     uint32_t getCoresTotal() const;
     Config getConfig() const;
 
+    // --- vmstat counters ---------------------------------------------------
+    // Counted per core per tick: on every tick each core is either running a
+    // process (active) or sitting empty (idle), so idle + active == total.
+    uint64_t getIdleTicks() const { return idleTicks; }
+    uint64_t getActiveTicks() const { return activeTicks; }
+    uint64_t getTotalTicks() const { return idleTicks + activeTicks; }
+
+    // --- memory statistics (process-smi / vmstat) --------------------------
+    uint32_t getTotalMemory() const { return memory.getTotalMemory(); }
+    uint32_t getUsedMemory() const { return memory.getUsedMemory(); }
+    uint32_t getFreeMemory() const { return memory.getFreeMemory(); }
+    uint64_t getNumPagedIn() const { return memory.getNumPagedIn(); }
+    uint64_t getNumPagedOut() const { return memory.getNumPagedOut(); }
+    uint32_t getResidentMemory(uint32_t pid) const { return memory.getResidentMemory(pid); }
+
 private:
     void generateMemorySnapshot(uint64_t tick);
 
@@ -41,4 +56,7 @@ private:
     std::vector<int> coreTickCounters;
     std::map<int, int> cpuQuantumCounter;
     uint32_t batchCounter;
+
+    uint64_t idleTicks = 0;
+    uint64_t activeTicks = 0;
 };
