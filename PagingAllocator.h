@@ -50,9 +50,14 @@ public:
     // completion and on an access violation alike.
     void destroyProcess(uint32_t pid);
 
+    // Drop pid's pinned frames. The scheduler calls this whenever a process
+    // leaves a core, so a preempted or sleeping process cannot hold frames
+    // hostage while it waits to be dispatched again.
+    void releasePins(uint32_t pid);
+
     // --- IProcessMemory (the MMU step) -------------------------------------
     void beginInstruction(uint32_t pid, uint32_t commandCounter) override;
-    bool ensureResident(uint32_t pid, uint32_t addr, uint32_t len) override;
+    Residency ensureResident(uint32_t pid, uint32_t addr, uint32_t len) override;
     uint16_t readWord(uint32_t pid, uint32_t addr) override;
     void writeWord(uint32_t pid, uint32_t addr, uint16_t value) override;
 

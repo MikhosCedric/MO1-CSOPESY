@@ -70,13 +70,24 @@ void PagingAllocator::destroyProcess(uint32_t pid) {
 // IProcessMemory
 // ---------------------------------------------------------------------------
 void PagingAllocator::beginInstruction(uint32_t pid, uint32_t commandCounter) {
-    pinnedFrames.clear();
+    // Release only THIS process's pins. Another process that faulted earlier in
+    // the tick keeps its own, so it still finds its pages resident when it
+    // retries. Clearing pins globally here lets each process evict the other's
+    // just-loaded pages, and when frames are scarce neither ever gets to run.
+    releasePins(pid);
     backingStore.setCommandCounter(pid, commandCounter);
 }
 
-bool PagingAllocator::ensureResident(uint32_t pid, uint32_t addr, uint32_t len) {
+void PagingAllocator::releasePins(uint32_t pid) {
+    pinnedFrames.erase(
+        std::remove_if(pinnedFrames.begin(), pinnedFrames.end(),
+                       [&](uint32_t f) { return frameTable[f].pid == pid; }),
+        pinnedFrames.end());
+}
+
+Residency PagingAllocator::ensureResident(uint32_t pid, uint32_t addr, uint32_t len) {
     auto it = processes.find(pid);
-    if (it == processes.end() || len == 0) return true;
+    if (it == processes.end() || len == 0) return Residency::RESIDENT;
     ProcessMemory& pm = it->second;
 
     // Page number = high-order bits of the address, offset = low-order bits.
@@ -87,15 +98,20 @@ bool PagingAllocator::ensureResident(uint32_t pid, uint32_t addr, uint32_t len) 
     bool faulted = false;
     for (uint32_t vpn = firstVpn; vpn <= lastVpn && vpn < pm.pageTable.size(); ++vpn) {
         if (!pm.pageTable[vpn].present) {
-            pageIn(pm, vpn);
-            faulted = true; // the instruction restarts whether or not a frame was won
+            if (!pageIn(pm, vpn)) {
+                // Every frame is pinned by a process mid-fault. Give up the ones
+                // pinned for this attempt instead of holding them while we wait:
+                // two processes each holding part of what the other needs never
+                // make progress.
+                releasePins(pid);
+                return Residency::UNAVAILABLE;
+            }
+            faulted = true;
         }
-        if (pm.pageTable[vpn].present) {
-            pinnedFrames.push_back(pm.pageTable[vpn].frameNumber);
-        }
+        pinnedFrames.push_back(pm.pageTable[vpn].frameNumber);
     }
 
-    return !faulted;
+    return faulted ? Residency::FAULTED : Residency::RESIDENT;
 }
 
 uint16_t PagingAllocator::readWord(uint32_t pid, uint32_t addr) {

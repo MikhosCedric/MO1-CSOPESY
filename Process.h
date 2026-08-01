@@ -45,6 +45,13 @@ struct ForContext {
     uint16_t remaining = 0;
 };
 
+// Outcome of making one region of an instruction's memory resident.
+enum class Residency {
+    RESIDENT,    // already present; nothing had to be paged in
+    FAULTED,     // present now, but a page was brought in - restart the line
+    UNAVAILABLE  // no frame could be won; this attempt's pins have been released
+};
+
 // The memory backend a process executes against - the only coupling between the
 // process model and the paging layer. Implemented by PagingAllocator.
 //
@@ -61,10 +68,11 @@ public:
     // store, which is what makes a swapped-out process resumable.
     virtual void beginInstruction(uint32_t pid, uint32_t commandCounter) = 0;
 
-    // Make the pages backing [addr, addr + len) resident and pin them. Returns
-    // false when a fault had to be serviced, in which case the caller must
-    // restart the instruction rather than consume the line.
-    virtual bool ensureResident(uint32_t pid, uint32_t addr, uint32_t len) = 0;
+    // Make the pages backing [addr, addr + len) resident and pin them. On
+    // UNAVAILABLE the caller must stop asking for more pages this attempt: the
+    // allocator has already dropped what it pinned, because holding some pages
+    // while waiting for the rest deadlocks two processes against each other.
+    virtual Residency ensureResident(uint32_t pid, uint32_t addr, uint32_t len) = 0;
 
     // Valid only for addresses a preceding ensureResident() made resident.
     virtual uint16_t readWord(uint32_t pid, uint32_t addr) = 0;

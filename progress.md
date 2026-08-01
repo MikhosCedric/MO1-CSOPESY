@@ -52,3 +52,21 @@ Remaining: `README.txt` (names, run instructions, entry file) and the PPT.
 Added the `README.txt` deliverable: authors, entry class file (`main.cpp` → `ConsoleManager::run()`), build/run steps, the config and command reference, and the runtime files.
 Documents the working-directory gotcha (`config.txt` is read from the CWD, so running `x64\Debug\MO1.exe` from its own folder fails to initialize) — verified, along with the `Result: 15` example as typed.
 Remaining: the PPT.
+
+## 2026-07-31 — PPT outline
+
+Drafted `ppt/MO2-PPT-outline.md`: 16 slides following the MO1 sample's rhythm (repeating section title, one prose paragraph, one visual per slide), covering the spec's four required topics.
+Memory addressing gets four slides per the spec's emphasis; ends with a table of the seven screenshots to capture and the configs that produce them.
+Remaining: build the actual .pptx from the outline.
+
+## 2026-08-01 — Mock quiz fixes
+
+Ran the mock quiz configs (`Docs/Mock Quiz.md`) and fixed four failures: `scheduler-test` was unrecognised, `screen -c` rejected the spec's own no-memory-size form, scarce frames deadlocked (global pins → per-process pins plus back-off when a whole instruction's page set can't be won), and the RR quantum was charged on faulting ticks so a process could be preempted before it ever retried.
+Cases 2–5 now run without deadlock; harness back to 55/55 after making its scheduler model faithful (sticky cores, quantum on execution, pins released on preempt).
+Two graded mismatches remain, both judgment calls: generated `SLEEP` of 0–255 ticks leaves processes asleep ~75% of the time (suppresses paging in case 2, stops case 5 finishing), and CPU utilisation counts assigned cores rather than executing ones (case 3 expects <100%).
+
+## 2026-08-01 — Instruction-generation tuning
+
+Narrowed generated `SLEEP` to 0–20 ticks and capped `FOR` nesting at two levels with 2–3 repeats: at three levels a "100 instruction" process executed ~40 instructions per line and ran for minutes, so nothing reached the finished list.
+CPU utilisation now counts cores that are not stalled on a page fault (busy-waiting on `delay-per-exec` still counts as busy, else any delay>0 config would read half). Case 3 now matches its expected output exactly; a solo 100-line process finishes in ~15s instead of minutes.
+Case 5 populates the finished list but slowly — `batch-process-freq 1` on 32 cores creates processes faster than they complete, so FCFS spreads the work thin.

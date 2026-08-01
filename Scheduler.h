@@ -25,6 +25,10 @@ public:
     uint32_t getCoresTotal() const;
     Config getConfig() const;
 
+    // Roll a size from [min-mem-per-proc, max-mem-per-proc], as a batch process
+    // gets. Used when screen -c is given no explicit memory size.
+    uint32_t rollProcessMemorySize() const;
+
     // --- vmstat counters ---------------------------------------------------
     // Counted per core per tick: on every tick each core is either running a
     // process (active) or sitting empty (idle), so idle + active == total.
@@ -59,4 +63,5 @@ private:
 
     uint64_t idleTicks = 0;
     uint64_t activeTicks = 0;
+    uint32_t coresBusyLastTick = 0;
 };

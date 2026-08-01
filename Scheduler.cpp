@@ -33,14 +33,15 @@ Scheduler::Scheduler(const Config& config)
 }
 
 void Scheduler::onTick(uint64_t tick) {
-    // Phase 0: Tick accounting, per core, before anything is dispatched - this
-    // is the assignment the cores actually spend this tick under. A core with a
-    // process on it is active; an empty one is idle. Every core-tick falls into
-    // exactly one bucket, so idle + active == total.
-    for (Process* p : cores) {
-        if (p) activeTicks++;
-        else   idleTicks++;
-    }
+    // Which cores did useful work this tick. A core is idle when it holds no
+    // process, or when its process spent the tick stalled on a page fault - the
+    // spec counts active ticks as cores "actually executing instructions", and
+    // under memory starvation an occupied core can fault every tick without
+    // ever running one. Busy-waiting on delay-per-exec still counts as busy:
+    // that is a configured throttle, not starvation, and treating it as idle
+    // would report half utilisation on any config with delay-per-exec > 0.
+    // Tallied after the cores run, in Phase 2b.
+    std::vector<bool> busy(cores.size(), false);
 
     // Phase 1: Process sleeping queue
     for (auto it = sleepingQueue.begin(); it != sleepingQueue.end(); ) {
@@ -68,10 +69,7 @@ void Scheduler::onTick(uint64_t tick) {
         }
 
         coreTickCounters[i]++;
-
-        if (config.scheduler == "rr") {
-            cpuQuantumCounter[proc->id]++;
-        }
+        bool stalled = false;
 
         if (coreTickCounters[i] >= static_cast<int>(config.delayPerExec)) {
             coreTickCounters[i] = 0;
@@ -79,8 +77,18 @@ void Scheduler::onTick(uint64_t tick) {
             // the allocator has serviced the fault and the same line runs again
             // next tick. A VIOLATION leaves the process TERMINATED, which
             // isFinished() reports below and frees exactly like completion.
-            proc->advance(memory);
+            //
+            // The quantum measures execution, not stalls: charging a faulting
+            // tick against it means that with a small quantum a process is
+            // preempted on the very tick it faulted and never reaches its
+            // retry, so under memory pressure it would never run at all.
+            const ExecResult result = proc->advance(memory);
+            if (result == ExecResult::COMPLETED && config.scheduler == "rr") {
+                cpuQuantumCounter[proc->id]++;
+            }
+            stalled = (result == ExecResult::PAGE_FAULT);
         }
+        busy[i] = !stalled;
 
         if (proc->isFinished()) {
             memory.destroyProcess(proc->id);
@@ -89,6 +97,9 @@ void Scheduler::onTick(uint64_t tick) {
             cpuQuantumCounter.erase(proc->id);
         }
         else if (proc->sleepRemaining > 0) {
+            // Leaving the core: drop its pinned frames so a process waiting to
+            // be dispatched is not blocked by one that is not even running.
+            memory.releasePins(proc->id);
             sleepingQueue.push_back({ proc, proc->sleepRemaining });
             proc->sleepRemaining = 0;
             proc->state = ProcessState::SLEEPING;
@@ -98,11 +109,25 @@ void Scheduler::onTick(uint64_t tick) {
         }
         else if (config.scheduler == "rr"
             && cpuQuantumCounter[proc->id] >= static_cast<int>(quantum)) {
+            memory.releasePins(proc->id);
             proc->state = ProcessState::READY;
             proc->attachedCore = -1;
             readyQueue.push_back(proc);
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);
+        }
+    }
+
+    // Phase 2b: Tick accounting. Every core-tick lands in exactly one bucket,
+    // so idle + active == total still holds.
+    coresBusyLastTick = 0;
+    for (size_t i = 0; i < cores.size(); i++) {
+        if (busy[i]) {
+            activeTicks++;
+            coresBusyLastTick++;
+        }
+        else {
+            idleTicks++;
         }
     }
 
@@ -202,12 +227,13 @@ std::vector<Process*> Scheduler::getAllProcesses() const {
     return result;
 }
 
+// Cores that actually executed an instruction on the last tick, not cores that
+// merely hold a process. Under memory starvation a core can be occupied yet
+// stalled on page faults every tick, and reporting that as full utilisation
+// hides exactly what a memory demo is meant to show. With enough memory every
+// occupied core executes each tick, so this equals occupancy as before.
 uint32_t Scheduler::getCoresUsed() const {
-    uint32_t count = 0;
-    for (auto* p : cores) {
-        if (p && !p->isFinished()) count++;
-    }
-    return count;
+    return coresBusyLastTick;
 }
 
 uint32_t Scheduler::getCoresTotal() const {
@@ -216,4 +242,8 @@ uint32_t Scheduler::getCoresTotal() const {
 
 Config Scheduler::getConfig() const {
     return config;
+}
+
+uint32_t Scheduler::rollProcessMemorySize() const {
+    return rollMemorySize(config.minMemPerProc, config.maxMemPerProc);
 }

@@ -177,10 +177,14 @@ static bool touchesSymbolTable(const Instruction& instr) {
 ExecResult Process::ensureResident(const Instruction& instr, IProcessMemory& mem) {
     mem.beginInstruction(id, static_cast<uint32_t>(currentLine));
 
-    bool resident = true;
+    bool faulted = false;
 
     if (touchesSymbolTable(instr)) {
-        resident &= mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+        // UNAVAILABLE means the allocator has already released this attempt's
+        // pins, so stop asking for pages and let another process run.
+        const Residency r = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+        if (r == Residency::UNAVAILABLE) return ExecResult::PAGE_FAULT;
+        if (r == Residency::FAULTED) faulted = true;
     }
 
     if (instr.opcode == Opcode::READ || instr.opcode == Opcode::WRITE) {
@@ -190,10 +194,12 @@ ExecResult Process::ensureResident(const Instruction& instr, IProcessMemory& mem
             raiseViolation(instr.addr);
             return ExecResult::VIOLATION;
         }
-        resident &= mem.ensureResident(id, instr.addr, 2);
+        const Residency r = mem.ensureResident(id, instr.addr, 2);
+        if (r == Residency::UNAVAILABLE) return ExecResult::PAGE_FAULT;
+        if (r == Residency::FAULTED) faulted = true;
     }
 
-    return resident ? ExecResult::COMPLETED : ExecResult::PAGE_FAULT;
+    return faulted ? ExecResult::PAGE_FAULT : ExecResult::COMPLETED;
 }
 
 ExecResult Process::advance(IProcessMemory& mem) {
@@ -290,8 +296,14 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
     std::uniform_int_distribution<uint32_t> countDist(minIns, maxIns);
     std::uniform_int_distribution<int> typeDist(0, 9);
     std::uniform_int_distribution<uint16_t> valDist(0, UINT16_MAX);
-    std::uniform_int_distribution<int> sleepDist(0, 255);
-    std::uniform_int_distribution<int> repeatDist(2, 5);
+    // SLEEP takes a uint8, but generating the full [0, 255] range leaves a
+    // process asleep for up to ~13 seconds at a 20 Hz tick. With sleeps landing
+    // every ~50 instructions that put processes to sleep for roughly three
+    // quarters of their wall time, which starves the cores, suppresses the page
+    // faults a memory demo is meant to show, and stops short processes from
+    // finishing. A shorter roll still exercises SLEEP without dominating.
+    std::uniform_int_distribution<int> sleepDist(0, 20);
+    std::uniform_int_distribution<int> repeatDist(2, 3);
     std::uniform_int_distribution<int> concatDist(0, 2);
     std::uniform_int_distribution<int> rareDist(0, 4);
 
@@ -309,7 +321,13 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
         Instruction instr;
         int type = typeDist(rng());
 
-        if (type >= 8 && depth < 3) {
+        // Nesting is capped at two levels, with 2-3 repeats. A FOR multiplies
+        // the work behind one line of code, and those multipliers compound with
+        // depth: at three levels with 2-5 repeats a "100 instruction" process
+        // executes ~40 instructions per line and runs for minutes, so nothing
+        // ever reaches the finished list. Two levels keeps loops (and nested
+        // loops) on show while a short process stays short.
+        if (type >= 8 && depth < 2) {
             instr.opcode = Opcode::FOR;
             instr.val1 = static_cast<uint16_t>(repeatDist(rng()));
             uint32_t bodyMin = 1;

@@ -155,7 +155,9 @@ void ConsoleManager::processMainCommand(const std::string& input) {
     else if (input.rfind("screen ", 0) == 0) {
         handleScreen(input);
     }
-    else if (input == "scheduler-start") {
+    // The spec names this command both ways (p.5 says "scheduler-test"), so
+    // accept either spelling.
+    else if (input == "scheduler-start" || input == "scheduler-test") {
         if (batchRunning) {
             std::cout << "Scheduler is already running." << std::endl;
             return;
@@ -205,8 +207,8 @@ void ConsoleManager::handleScreen(const std::string& input) {
     iss >> cmd >> flag;
 
     if (flag == "-s" || flag == "-c") {
-        iss >> name >> sizeToken;
-        if (name.empty() || sizeToken.empty()) {
+        iss >> name;
+        if (name.empty()) {
             std::cout << (flag == "-s"
                 ? "Usage: screen -s <process_name> <process_memory_size>"
                 : "Usage: screen -c <process_name> <process_memory_size> \"<instructions>\"")
@@ -214,8 +216,22 @@ void ConsoleManager::handleScreen(const std::string& input) {
             return;
         }
 
+        // On screen -c the size is optional: the spec's own worked example and
+        // the mock quiz both write screen -c <name> "<instructions>". When it is
+        // omitted the process rolls a size the same way a batch process does.
+        iss >> sizeToken;
+        const bool sizeOmitted = (flag == "-c" && (sizeToken.empty() || sizeToken.front() == '"'));
+
         uint64_t memSize = 0;
-        if (!parseMemorySize(sizeToken, memSize)) {
+        if (sizeOmitted) {
+            std::lock_guard<std::mutex> lock(schedulerMutex);
+            memSize = scheduler->rollProcessMemorySize();
+        }
+        else if (sizeToken.empty()) {
+            std::cout << "Usage: screen -s <process_name> <process_memory_size>" << std::endl;
+            return;
+        }
+        else if (!parseMemorySize(sizeToken, memSize)) {
             std::cout << "invalid memory allocation" << std::endl;
             return;
         }
