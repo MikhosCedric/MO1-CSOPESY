@@ -22,6 +22,8 @@ private:
     void processMainCommand(const std::string& input);
     void handleScreen(const std::string& input);
     void handleScreenLS();
+    void handleProcessSmi();
+    void handleVmstat();
     void handleReportUtil();
     std::string buildUtilReport();
 

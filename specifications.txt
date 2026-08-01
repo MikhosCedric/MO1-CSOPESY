@@ -1,0 +1,208 @@
+# SYSTEM PROMPT / TECHNICAL SPECIFICATION: CSOPESY MO2 MULTITASKING OS EMULATOR WITH MEMORY MANAGEMENT
+
+## 1. Overview & Context
+
+You are tasked with extending the existing **CSOPESY OS Emulator (MO1)** into a full **Multitasking Operating System with Virtual Memory Management (MO2)**. 
+
+The existing codebase contains the baseline OS console structure, process scheduling (FCFS / RR), and basic execution framework. You must treat these instructions as **incremental adjustments, additions, and structural modifications** to the current working codebase.
+
+---
+
+## 2. Configuration System (`config.txt`) & System Initialization
+
+### 2.1 Enforced Startup State
+* Prior to executing any system commands, the OS **must require** the user to run the `initialize` command.
+* If any command (other than `exit` or help commands) is entered before `initialize`, display an error requiring initialization first.
+* Running `initialize` reads parameters from `config.txt` (space-separated text file format).
+
+### 2.2 Configuration Parameters
+Ensure your configuration parser reads both existing MO1 parameters and the newly added MO2 memory parameters:
+
+| Parameter | Type / Format | Valid Range / Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `num-cpu` | Integer | [1, 128] | Number of CPUs available. |
+| `scheduler` | String | `"fcfs"` or `"rr"` | The scheduler algorithm. |
+| `quantum-cycles` | Integer | [1, 2^32] | The time slice is given for each processor if a round-robin scheduler is used. |
+| `batch-process-freq` | Integer | [1, 2^32] | The frequency of generating processes in the "scheduler-test" command in CPU cycles. |
+| `min-ins` | Integer | [1, 2^32] | The minimum instructions/command per process. |
+| `max-ins` | Integer | [1, 2^32] | The maximum instructions/command per process. |
+| `delay-per-exec` | Integer | [0, 2^32] | Delay before executing the next instruction in CPU cycles. |
+| `max-overall-mem` | Integer | Power of 2 in [2^6, 2^16] | Maximum memory available in bytes. |
+| `mem-per-frame` | Integer | Power of 2 in [2^6, 2^16] | The size of memory in bytes per frame. This is also the memory size per page. |
+| `min-mem-per-proc` | Integer | Power of 2 in [2^6, 2^16] | Minimum memory required for each process created via the "scheduler_start" command. |
+| `max-mem-per-proc` | Integer | Power of 2 in [2^6, 2^16] | Maximum memory required for each process created via the "scheduler_start" command. |
+
+---
+
+## 3. CLI Command Specifications & UI Updates
+
+### 3.1 `process-smi` (Memory Summary View)
+Generates a high-level GPU/CPU-like status overview:
+* Displays `CPU-Util` (percentage of active CPU cores).
+* Displays `Memory Usage` (Used MiB / Total MiB) and `Memory Util` percentage.
+* Lists all currently running processes alongside their allocated memory footprint (e.g., `process05 134MiB`).
+
+### 3.2 `vmstat` (Detailed Virtual Memory Statistics)
+Displays fine-grained system and memory statistics formatted as follows:
+* `total memory`: Total main memory in bytes.
+* `used memory`: Total active memory used by processes.
+* `active memory` / `inactive memory` / `free memory`: Physical memory breakdowns.
+* `idle cpu ticks`: Number of ticks wherein CPU cores remained idle.
+* `active cpu ticks`: Number of ticks wherein CPU cores are actually executing instructions.
+* `total cpu ticks`: Number of ticks that passed for all CPU cores.
+* `pages paged in`: Accumulated number of pages paged in.
+* `pages paged out`: Accumulated number of pages paged out.
+
+### 3.3 `screen -s <process_name> <process_memory_size>`
+* Creates a new process with a given name and memory allocation.
+* **Validation:** All memory ranges are [2^6, 2^16] bytes and the power of 2 format. The console will throw an "invalid memory allocation" message to the user if it's outside of range.
+
+### 3.4 `screen -c <process_name> <process_memory_size> "<instructions>"`
+* Sends a string of 1 to 50 instructions to be executed by the specified process.
+* Instructions are semicolon-separated.
+* Throws "invalid command" if the instruction size is not met.
+
+### 3.5 `screen -r <process_name>` (Updated Terminal Attach Logic)
+* Access the screen anytime. If the process name is not found/finished execution, the console prints "Process <process name> not found."
+* **Access Violation State:** If the process name has prematurely shut down due to a memory access violation error, the console should print "Process <process name> shut down due to memory access violation error that occurred at <HH:MM:SS>. <Hex memory address> invalid."
+
+---
+
+## 4. Memory Manager & Demand Paging Architecture
+
+### 4.1 Page & Frame System
+1. **Virtual Paging:** The total number of frames is equal to `max-overall-mem` / `mem-per-frame`. Let P be the number of pages required by a process and M is the rolled value. P can be computed as M / `mem-per-frame`.
+2. **Demand Paging:** Pages are loaded into physical memory frames on demand. When a process references a virtual memory page that is not currently in a frame, a page fault occurs, and the required page is brought from the backing store into a free frame.
+
+### 4.2 Backing Store (`csopesy-backing-store.txt`)
+* The backing store is represented as a text file that can be accessed at any given time. It is saved in a text file "csopesy-backing-store.txt."
+* If no frames are free, a page replacement algorithm selects a page to be evicted to the backing store.
+
+---
+
+## 5. Instruction Set & Process Execution Mechanics
+
+### 5.1 Symbol Table Segment
+* `uint16` variables are stored in the symbol table segment of the process.
+* The symbol table segment has a fixed size of 64 bytes. Your program can store a maximum of 32 variables.
+* If the limit is reached, succeeding instructions involving variable declarations will be ignored.
+* `uint16` variables are clamped between (0, max(uint16)) and consume 2 bytes of memory.
+
+### 5.2 Emulated Instruction Details
+* `DECLARE <var> <value>`: Declares a uint16 variable.
+* `ADD <varA> <varA> <varB>`: Adds variables.
+* `WRITE <memory_address> <value>`: writes uint16 value to the specified memory address.
+* `READ <var> <memory_address>`: performs a retrieval of a uint16 value from memory and stores it to a variable, var. If the memory block isn't initialized, the uint16 value is 0.
+* `PRINT` operations for outputting values.
+
+---
+
+## 6. Assessment Mockup Questions & Test Cases
+
+The internal AI assistant should use these exact parameters and sequences to verify functionality, simulate output, or write integration tests.
+
+### Test Case 1: Constant Page Swapping (Reference: `i8K6pdIT.jpg`)
+**`config.txt` Parameters:**
+* `num-cpu`: 2
+* `scheduler`: "fcfs"
+* `quantum-cycles`: 0
+* `batch-process-freq`: 1
+* `min-ins`: 4000
+* `max-ins`: 4000
+* `delay-per-exec`: 0
+* `max-overall-mem`: 512
+* `mem-per-frame`: 256
+* `min-mem-per-proc`: 512
+* `max-mem-per-proc`: 512
+
+**Execution Sequence:**
+1. Create **two processes** using the `screen` command.
+2. Wait for 5 seconds.
+3. Type the `screen -ls` command.
+4. Type the `process-smi` command.
+
+**Expected Output:**
+The system should allow the 2nd process to run, but it will result in very high page-ins and page-outs because only 1 process can fit in the main memory (512 max mem / 512 required per proc). The system will be in a constant state of swapping pages to and from the backing store.
+
+### Test Case 2: CPU Utilization & Memory Limits (Reference: `WnE1Ph8G.jpg`)
+**`config.txt` Parameters:**
+* `num-cpu`: 16
+* `scheduler`: "rr"
+* `quantum-cycles`: 5
+* `batch-process-freq`: 1
+* `min-ins`: 1000
+* `max-ins`: 2000
+* `delay-per-exec`: 1
+* `max-overall-mem`: 32768
+* `mem-per-frame`: 32768
+* `min-mem-per-proc`: 32768
+* `max-mem-per-proc`: 32768
+
+**Execution Sequence:**
+1. Execute `scheduler-test` command.
+2. Wait for 5 seconds.
+3. Type the `process-smi` command.
+4. Type the `screen -ls` command.
+5. Type the `vmstat` command.
+
+**Expected Output:**
+* For `screen -ls`: It should show < 100% CPU utilization printed in the command, as only one process is allowed to run due to memory limits (Process needs 32768, Overall Memory is 32768).
+* For `vmstat`: It should show information such as total memory, used memory, and free memory. `Used memory = 32768KB`, `Free memory = 0KB`.
+
+### Test Case 3: Custom Instructions Execution (Reference: `gVz5qWNt.jpg`)
+**`config.txt` Parameters:**
+* `num-cpu`: 1
+* `scheduler`: "rr"
+* `quantum-cycles`: 10
+* `batch-process-freq`: 1
+* `min-ins`: 1000
+* `max-ins`: 1000
+* `delay-per-exec`: 0
+* `max-overall-mem`: 256
+* `mem-per-frame`: 256
+* `min-mem-per-proc`: 256
+* `max-mem-per-proc`: 256
+
+**Execution Sequence:**
+1. Execute the following command: `screen -c faulty_process "DECLARE varA 10; DECLARE varB 5; ADD varA varA varB; WRITE 0x500 varA; READ varC 0x500; PRINT(\"Variable A: \" + varA); PRINT(\"Result: \" + varC)"`
+2. Type the `screen -ls` command.
+3. Type the `screen -r` command to access `faulty_process`.
+
+**Expected Output:**
+The correct variables, A and C are printed in the console.
+
+### Test Case 4: Stress Test (Reference: `SLD-_XaQ.jpg`)
+**`config.txt` Parameters:**
+* `num-cpu`: 32
+* `scheduler`: "fcfs"
+* `quantum-cycles`: 5
+* `batch-process-freq`: 1
+* `min-ins`: 100
+* `max-ins`: 100
+* `delay-per-exec`: 0
+* `max-overall-mem`: 4096
+* `mem-per-frame`: 64
+* `min-mem-per-proc`: 512
+* `max-mem-per-proc`: 512
+
+**Execution Sequence:**
+1. Run the `scheduler-start` command.
+2. Wait for 20 seconds.
+3. At every 2-second interval, type the `process-smi` command, and then type the `vmstat` command. Repeat this process for 20 seconds.
+
+**Expected Output:**
+* No deadlock occurs. 
+* The `vmstat` should clearly indicate a full memory, and the number of paged in/outs are continuously increasing. 
+* If possible, the processes are moving to the "finished processes" list as they have short instructions.
+
+---
+
+## 7. Change Logging & Documentation Instructions
+
+After completing any code modifications, updates, or feature additions, you **MUST** append a entry in simple, human-readable terms to a `CHANGELOG.md` file (or print a summary log in the solution output window) formatted as follows:
+
+### [Date/Timestamp] - Feature Component Updated
+* **What was changed:** Clear, non-jargon description of the feature modified or added.
+* **Why it was changed:** Technical rationale mapped back to the specification.
+* **Affected files:** List of source code files modified.
+* **Verification / Output:** Quick summary of test cases passed (e.g., verifying behavior against Stress Test 4).

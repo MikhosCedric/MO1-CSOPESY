@@ -5,6 +5,7 @@
 #include <utility>
 #include "Process.h"
 #include "ConfigManager.h"
+#include "MemoryManager.h"
 
 class Scheduler {
 public:
@@ -24,9 +25,15 @@ public:
     uint32_t getCoresTotal() const;
     Config getConfig() const;
 
+    MemoryManager& getMemoryManager();
+    uint64_t getActiveCpuTicks() const;
+    uint64_t getIdleCpuTicks() const;
+    uint64_t getTotalCpuTicks() const;
+
 private:
     Config config;
     uint32_t quantum;
+    MemoryManager memory;
 
     std::vector<std::unique_ptr<Process>> allProcs;
     std::vector<Process*> readyQueue;
@@ -36,4 +43,7 @@ private:
     std::vector<int> coreTickCounters;
     std::map<int, int> cpuQuantumCounter;
     uint32_t batchCounter;
+
+    uint64_t activeCpuTicks;
+    uint64_t idleCpuTicks;
 };

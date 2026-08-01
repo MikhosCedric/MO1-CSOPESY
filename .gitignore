@@ -367,6 +367,7 @@ FodyWeavers.xsd
 stdin
 stdout.txt
 csopesy-log.txt
+csopesy-backing-store.txt
 classSpecs.txt
 specs.txt
 num5.txt

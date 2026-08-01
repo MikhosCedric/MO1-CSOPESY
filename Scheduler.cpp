@@ -2,11 +2,31 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <random>
+#include <ctime>
+
+static std::mt19937& schedRng() {
+    static std::mt19937 instance(static_cast<unsigned>(std::time(nullptr)));
+    return instance;
+}
+
+static uint32_t randomPowerOfTwoBetween(uint32_t minV, uint32_t maxV) {
+    int minExp = 0;
+    int maxExp = 0;
+    while ((1u << minExp) < minV) minExp++;
+    while ((1u << maxExp) <= maxV) maxExp++;
+    maxExp--;
+    std::uniform_int_distribution<int> dist(minExp, maxExp);
+    return 1u << dist(schedRng());
+}
 
 Scheduler::Scheduler(const Config& config)
     : config(config)
     , quantum(config.scheduler == "rr" ? config.quantumCycles : 0)
+    , memory(config.maxOverallMem, config.memPerFrame)
     , batchCounter(0)
+    , activeCpuTicks(0)
+    , idleCpuTicks(0)
 {
     cores.resize(config.numCpu, nullptr);
     coreTickCounters.resize(config.numCpu, 0);
@@ -30,10 +50,20 @@ void Scheduler::onTick(uint64_t tick) {
     // Phase 2: Process cores
     for (size_t i = 0; i < cores.size(); i++) {
         Process* proc = cores[i];
-        if (!proc) continue;
+        if (!proc) {
+            idleCpuTicks++;
+            continue;
+        }
+
         if (proc->isFinished()) {
+            if (proc->state == ProcessState::FINISHED) {
+                finishedQueue.push_back(proc);
+            }
+            memory.releaseProcess(proc->id);
+            memory.setProcessRunning(proc->id, false);
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);
+            idleCpuTicks++;
             continue;
         }
 
@@ -43,13 +73,25 @@ void Scheduler::onTick(uint64_t tick) {
             cpuQuantumCounter[proc->id]++;
         }
 
+        bool advanced = false;
         if (coreTickCounters[i] >= static_cast<int>(config.delayPerExec)) {
             coreTickCounters[i] = 0;
-            proc->advance();
+            advanced = proc->advance();
+        }
+
+        if (advanced) {
+            activeCpuTicks++;
+        }
+        else {
+            idleCpuTicks++;
         }
 
         if (proc->isFinished()) {
-            finishedQueue.push_back(proc);
+            if (proc->state == ProcessState::FINISHED) {
+                finishedQueue.push_back(proc);
+            }
+            memory.releaseProcess(proc->id);
+            memory.setProcessRunning(proc->id, false);
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);
         }
@@ -58,6 +100,7 @@ void Scheduler::onTick(uint64_t tick) {
             proc->sleepRemaining = 0;
             proc->state = ProcessState::SLEEPING;
             proc->attachedCore = -1;
+            memory.setProcessRunning(proc->id, false);
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);
         }
@@ -65,6 +108,7 @@ void Scheduler::onTick(uint64_t tick) {
             && cpuQuantumCounter[proc->id] >= static_cast<int>(quantum)) {
             proc->state = ProcessState::READY;
             proc->attachedCore = -1;
+            memory.setProcessRunning(proc->id, false);
             readyQueue.push_back(proc);
             cores[i] = nullptr;
             cpuQuantumCounter.erase(proc->id);
@@ -74,14 +118,18 @@ void Scheduler::onTick(uint64_t tick) {
     // Phase 3: Dispatch ready processes to idle cores
     for (size_t i = 0; i < cores.size(); i++) {
         if (cores[i] == nullptr && !readyQueue.empty()) {
-            cores[i] = readyQueue.front();
-            readyQueue.front()->state = ProcessState::RUNNING;
-            readyQueue.front()->attachedCore = static_cast<int>(i);
-            coreTickCounters[i] = 0;
+            Process* proc = readyQueue.front();
             readyQueue.erase(readyQueue.begin());
+            cores[i] = proc;
+            proc->state = ProcessState::RUNNING;
+            proc->attachedCore = static_cast<int>(i);
+            coreTickCounters[i] = 0;
             if (config.scheduler == "rr") {
-                cpuQuantumCounter[cores[i]->id] = 0;
+                cpuQuantumCounter[proc->id] = 0;
             }
+            memory.setProcessRunning(proc->id, true);
+            memory.prefetchPage(proc->id);
+            idleCpuTicks++;
         }
     }
 }
@@ -96,7 +144,8 @@ void Scheduler::generateBatchProcess() {
     batchCounter++;
     std::ostringstream oss;
     oss << "p" << std::setw(2) << std::setfill('0') << batchCounter;
-    auto proc = std::make_unique<Process>(oss.str(), config.minIns, config.maxIns);
+    uint32_t memSize = randomPowerOfTwoBetween(config.minMemPerProc, config.maxMemPerProc);
+    auto proc = std::make_unique<Process>(oss.str(), config.minIns, config.maxIns, memSize, &memory);
     Process* raw = proc.get();
     allProcs.push_back(std::move(proc));
     readyQueue.push_back(raw);
@@ -138,4 +187,20 @@ uint32_t Scheduler::getCoresTotal() const {
 
 Config Scheduler::getConfig() const {
     return config;
+}
+
+MemoryManager& Scheduler::getMemoryManager() {
+    return memory;
+}
+
+uint64_t Scheduler::getActiveCpuTicks() const {
+    return activeCpuTicks;
+}
+
+uint64_t Scheduler::getIdleCpuTicks() const {
+    return idleCpuTicks;
+}
+
+uint64_t Scheduler::getTotalCpuTicks() const {
+    return activeCpuTicks + idleCpuTicks;
 }

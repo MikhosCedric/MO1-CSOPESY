@@ -59,9 +59,25 @@ Config ConfigManager::parse(const std::string& path) {
         else if (key == "delay-per-exec") {
             config.delayPerExec = static_cast<uint32_t>(std::stoul(valStr));
         }
+        else if (key == "max-overall-mem") {
+            config.maxOverallMem = static_cast<uint32_t>(std::stoul(valStr));
+        }
+        else if (key == "mem-per-frame") {
+            config.memPerFrame = static_cast<uint32_t>(std::stoul(valStr));
+        }
+        else if (key == "min-mem-per-proc") {
+            config.minMemPerProc = static_cast<uint32_t>(std::stoul(valStr));
+        }
+        else if (key == "max-mem-per-proc") {
+            config.maxMemPerProc = static_cast<uint32_t>(std::stoul(valStr));
+        }
     }
 
     return config;
+}
+
+static bool isPowerOfTwo(uint32_t value) {
+    return value > 0 && (value & (value - 1)) == 0;
 }
 
 bool ConfigManager::validate(const Config& config) {
@@ -83,6 +99,29 @@ bool ConfigManager::validate(const Config& config) {
     }
     if (config.minIns < 1 || config.maxIns < config.minIns) {
         std::cerr << "Error: invalid min-ins/max-ins range" << std::endl;
+        return false;
+    }
+    auto inMemRange = [](uint32_t v) {
+        return v >= 64 && v <= 65536 && isPowerOfTwo(v);
+    };
+    if (!inMemRange(config.maxOverallMem)) {
+        std::cerr << "Error: max-overall-mem must be a power of 2 in [64, 65536]" << std::endl;
+        return false;
+    }
+    if (!inMemRange(config.memPerFrame)) {
+        std::cerr << "Error: mem-per-frame must be a power of 2 in [64, 65536]" << std::endl;
+        return false;
+    }
+    if (!inMemRange(config.minMemPerProc) || !inMemRange(config.maxMemPerProc)) {
+        std::cerr << "Error: min/max-mem-per-proc must be powers of 2 in [64, 65536]" << std::endl;
+        return false;
+    }
+    if (config.maxOverallMem % config.memPerFrame != 0) {
+        std::cerr << "Error: mem-per-frame must evenly divide max-overall-mem" << std::endl;
+        return false;
+    }
+    if (config.minMemPerProc > config.maxMemPerProc) {
+        std::cerr << "Error: min-mem-per-proc must not exceed max-mem-per-proc" << std::endl;
         return false;
     }
     return true;
