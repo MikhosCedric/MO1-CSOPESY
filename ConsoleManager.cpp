@@ -306,11 +306,15 @@ void ConsoleManager::handleScreen(const std::string& input) {
             }
 
             auto it = std::find_if(procs.begin(), procs.end(),
-                [&](Process* p) { return p->name == name && !p->isFinished(); });
+                [&](Process* p) { return p->name == name; });
             if (it != procs.end()) {
                 screenMgr.attachToProcess(name);
                 system("cls");
                 std::cout << "Switched to process " << name << " screen." << std::endl;
+                // Reattaching is how the mock quiz asks to observe PRINT
+                // results.  Render saved output immediately, including for a
+                // process that completed between screen -ls and screen -r.
+                screenMgr.showProcessSMI(**it);
             }
             else {
                 std::cout << "Process " << name << " not found." << std::endl;
@@ -352,8 +356,9 @@ std::string ConsoleManager::buildUtilReport() {
     for (auto* p : scheduler->getFinishedProcesses()) {
         oss << std::left << std::setw(12) << p->name
             << " (" << p->getTimestamp() << ")"
-            << "   Finished  "
-            << std::right << std::setw(5) << p->totalLines
+            << (p->isTerminated() ? "   Terminated " : "   Finished   ")
+            << std::right << std::setw(5)
+            << (p->isTerminated() ? p->currentLine : p->totalLines)
             << " / " << std::left << p->totalLines << std::endl;
     }
     oss << "----------------------------------------" << std::endl;

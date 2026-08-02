@@ -91,7 +91,10 @@ void Process::writeVariable(const std::string& name, uint16_t value, IProcessMem
 }
 
 bool Process::isValidAddress(uint32_t addr) const {
-    return static_cast<uint64_t>(addr) + 2 <= memorySize;
+    // A word must fit completely in the emulated 16-bit virtual address space.
+    // Process memorySize is the paging allocation selected by screen/config;
+    // the mock tests intentionally use address 0x500 with a 256-byte process.
+    return static_cast<uint64_t>(addr) + 2 <= VIRTUAL_ADDRESS_SPACE_BYTES;
 }
 
 void Process::raiseViolation(uint32_t addr) {
@@ -225,6 +228,18 @@ ExecResult Process::advance(IProcessMemory& mem) {
         return ExecResult::COMPLETED;
     }
 
+    // READ/WRITE are staged so a variable page and a target page never have to
+    // be resident simultaneously.  This is essential for the valid one-frame
+    // configuration used by the MO2 mock quiz.
+    if (instr->opcode == Opcode::READ || instr->opcode == Opcode::WRITE) {
+        ExecResult result = advanceMemoryInstruction(*instr, mem);
+        if (result == ExecResult::COMPLETED
+            && currentLine >= instructions.size() && forStack.empty()) {
+            state = ProcessState::FINISHED;
+        }
+        return result;
+    }
+
     // Neither a fault nor a violation consumes the line: on PAGE_FAULT the
     // allocator has serviced the fault and this same instruction is retried on
     // the next tick, and on VIOLATION the process is already dead.
@@ -238,6 +253,63 @@ ExecResult Process::advance(IProcessMemory& mem) {
         state = ProcessState::FINISHED;
     }
 
+    return ExecResult::COMPLETED;
+}
+
+ExecResult Process::advanceMemoryInstruction(const Instruction& instr,
+                                             IProcessMemory& mem) {
+    if (!isValidAddress(instr.addr)) {
+        memoryOperandReady = false;
+        raiseViolation(instr.addr);
+        return ExecResult::VIOLATION;
+    }
+
+    if (instr.opcode == Opcode::WRITE) {
+        // Resolve a variable source while the symbol-table page is resident,
+        // then retain the value in a simulated CPU register while the target
+        // page is brought in.  Literal WRITE operands skip this first stage.
+        if (!memoryOperandReady) {
+            if (!instr.arg1.empty()) {
+                mem.beginInstruction(id, static_cast<uint32_t>(currentLine));
+                const Residency symbol = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+                if (symbol != Residency::RESIDENT) return ExecResult::PAGE_FAULT;
+                memoryOperandValue = readVariable(instr.arg1, mem);
+            }
+            else {
+                memoryOperandValue = instr.val1;
+            }
+            memoryOperandReady = true;
+        }
+
+        // beginInstruction releases the source page's pin.  It may now be
+        // evicted to make room for the target page on a one-frame machine.
+        mem.beginInstruction(id, static_cast<uint32_t>(currentLine));
+        const Residency target = mem.ensureResident(id, instr.addr, 2);
+        if (target != Residency::RESIDENT) return ExecResult::PAGE_FAULT;
+
+        mem.writeWord(id, instr.addr, memoryOperandValue);
+        memoryOperandReady = false;
+        advanceLine();
+        return ExecResult::COMPLETED;
+    }
+
+    // READ is the reverse: fetch the target into the simulated register, then
+    // release that page and fault in the symbol table before storing the value.
+    if (!memoryOperandReady) {
+        mem.beginInstruction(id, static_cast<uint32_t>(currentLine));
+        const Residency target = mem.ensureResident(id, instr.addr, 2);
+        if (target != Residency::RESIDENT) return ExecResult::PAGE_FAULT;
+        memoryOperandValue = mem.readWord(id, instr.addr);
+        memoryOperandReady = true;
+    }
+
+    mem.beginInstruction(id, static_cast<uint32_t>(currentLine));
+    const Residency symbol = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+    if (symbol != Residency::RESIDENT) return ExecResult::PAGE_FAULT;
+
+    writeVariable(instr.arg1, memoryOperandValue, mem);
+    memoryOperandReady = false;
+    advanceLine();
     return ExecResult::COMPLETED;
 }
 

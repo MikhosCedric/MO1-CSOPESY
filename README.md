@@ -118,10 +118,12 @@ the process is still running.
 
 ## Behaviour notes
 
-- Each process owns its own address space. Bytes `[0, 64)` are its **symbol table
-  segment**, holding up to 32 uint16 variables of 2 bytes each; declarations past
-  the 32nd are silently ignored. The rest is user-addressable.
-- Reading or writing outside a process's own memory space is an **access
+- Each process has an emulated 16-bit address space. Bytes `[0, 64)` are its
+  **symbol table segment**, holding up to 32 uint16 variables of 2 bytes each;
+  declarations past the 32nd are silently ignored. Hexadecimal READ/WRITE
+  addresses range from `0x0000` through `0xFFFF` (a uint16 word must start no
+  later than `0xFFFE`).
+- Reading or writing a uint16 word outside that address space is an **access
   violation**: the process is killed, and `screen -r` reports the time and the
   offending address.
 - Memory is allocated **lazily**. A new process's pages all start in the backing

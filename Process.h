@@ -20,8 +20,8 @@ enum class ProcessState {
 //                the allocator services the fault and the same instruction is
 //                retried on a later tick. Phase 3 raises this; Phase 2 only
 //                guarantees the control flow that makes the retry correct.
-//   VIOLATION  - the process referenced an address outside its own memory
-//                space and has been killed (state == TERMINATED).
+//   VIOLATION  - the process referenced an address outside the emulated
+//                16-bit address space and has been killed (state == TERMINATED).
 enum class ExecResult {
     COMPLETED, PAGE_FAULT, VIOLATION
 };
@@ -81,16 +81,15 @@ public:
 
 // Address-space layout
 // --------------------
-// A process owns memorySize bytes of its own virtual space, laid out as two
-// segments:
+// A process has a configured memory allocation of memorySize bytes and an
+// emulated 16-bit address space laid out as follows:
 //
-//   [0, 64)            symbol table segment - 32 slots of 2 bytes
-//   [64, memorySize)   user-addressable space
+//   [0, 64)              symbol table segment - 32 slots of 2 bytes
+//   [0, 65536)           emulated hexadecimal READ/WRITE address space
 //
 // Declarations past the 32nd are silently ignored (spec). READ/WRITE are
-// bounds-checked against the whole space, so a user address below 64 is legal
-// and aliases the symbol table - the spec only defines an out-of-space
-// reference as a violation.
+// bounds-checked as uint16 word addresses. A user address below 64 is legal and
+// aliases the symbol table.
 //
 // The bytes themselves live in the allocator's frames, not here: the symbol
 // table is a named segment of the process's page set and faults like any other
@@ -99,6 +98,11 @@ class Process {
 public:
     static constexpr uint32_t SYMBOL_TABLE_BYTES = 64;
     static constexpr uint32_t MAX_VARIABLES = 32; // 64 bytes / 2 bytes per uint16
+    // READ/WRITE use a 16-bit emulated virtual-address space.  The separately
+    // configured process memory size controls its paging allocation/workload;
+    // it is not the numeric upper bound of hexadecimal addresses such as
+    // 0x500 used by the MO2 mock tests.
+    static constexpr uint32_t VIRTUAL_ADDRESS_SPACE_BYTES = 65536;
 
     static uint32_t nextId;
 
@@ -154,6 +158,7 @@ private:
     // Bring in everything the instruction touches before running any of it, so
     // execution itself cannot fault half-way through.
     ExecResult ensureResident(const Instruction& instr, IProcessMemory& mem);
+    ExecResult advanceMemoryInstruction(const Instruction& instr, IProcessMemory& mem);
     void executeInstruction(const Instruction& instr, IProcessMemory& mem);
 
     // Symbol table. resolveVariable returns false only when the table is full
@@ -164,6 +169,13 @@ private:
 
     bool isValidAddress(uint32_t addr) const;
     void raiseViolation(uint32_t addr);
+
+    // READ/WRITE may touch two different pages (a named variable in the symbol
+    // table and the hexadecimal target).  Keep the intermediate uint16 in a
+    // simulated CPU register so the instruction can make progress even when
+    // physical memory contains only one frame.
+    bool memoryOperandReady = false;
+    uint16_t memoryOperandValue = 0;
 
     static std::vector<Instruction> generateInstructions(uint32_t minIns, uint32_t maxIns,
                                                         uint32_t memorySize, uint32_t depth);

@@ -21,12 +21,10 @@
 //   * Every process gets its OWN virtual space [0, memorySize) and its own page
 //     table, so memory is attributable per process (process-smi) rather than to
 //     an anonymous allocation.
-//   * createProcess() is LAZY: it builds the page table with every PTE
-//     present = false and writes all of the process's pages to the backing
-//     store. It consumes no frames. A grader opening the store right after
-//     screen -s already sees the process's pages, per the notes' "at the start
-//     of execution an active process will have all its pages in the backing
-//     store and marked as invalid".
+//   * createProcess() is LAZY: it builds a 16-bit virtual page table with every
+//     PTE present = false and writes the configured allocation's pages to the
+//     backing store. Sparse hexadecimal pages are zero-filled on first touch.
+//     It consumes no frames.
 //   * A frame is acquired only on a fault, and faults only happen inside
 //     Process::advance(), which only runs on a CPU worker.
 //   * When no free frame exists, a FIFO victim is paged OUT; a later reference

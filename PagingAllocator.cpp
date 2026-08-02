@@ -20,23 +20,30 @@ PagingAllocator::PagingAllocator(uint32_t maxOverallMem, uint32_t frameSize)
 }
 
 // ---------------------------------------------------------------------------
-// createProcess: lazy allocation. Build the page table with every page invalid
-// and push the whole (zero-filled) address space out to the backing store. No
-// frame is taken - the first reference to each page faults it in.
+// createProcess: lazy allocation. Build the 16-bit virtual page table with
+// every page invalid and put the configured allocation's zero-filled pages in
+// the backing store. Sparse hexadecimal pages are zero-filled on first touch.
+// No frame is taken - the first reference to each page faults it in.
 // ---------------------------------------------------------------------------
 void PagingAllocator::createProcess(uint32_t pid, const std::string& name, uint32_t memorySize) {
     if (frameSize == 0 || memorySize == 0) return;
     if (processes.count(pid)) return;
 
-    uint32_t numPages = (memorySize + frameSize - 1) / frameSize; // ceil division
+    const uint32_t allocatedPages =
+        (memorySize + frameSize - 1) / frameSize; // reported/configured allocation
+    const uint32_t virtualPages =
+        (Process::VIRTUAL_ADDRESS_SPACE_BYTES + frameSize - 1) / frameSize;
 
     ProcessMemory pm;
     pm.pid = pid;
     pm.name = name;
     pm.memorySize = memorySize;
-    pm.pageTable.resize(numPages); // every PTE present = false
+    // Hexadecimal READ/WRITE addresses live in a sparse 16-bit virtual space.
+    // PTEs outside the configured allocation are zero-filled on first touch;
+    // the backing-store record still reports the process's configured size.
+    pm.pageTable.resize(virtualPages); // every PTE present = false
 
-    backingStore.addProcess(pid, name, memorySize, numPages, frameSize);
+    backingStore.addProcess(pid, name, memorySize, allocatedPages, frameSize);
 
     processes.emplace(pid, std::move(pm));
 }
