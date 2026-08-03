@@ -112,6 +112,13 @@ public:
     std::vector<Instruction> instructions;
     std::string creationTime;
 
+    // Detailed execution trace written to proc-logs/proc<id>.txt - one line per
+    // instruction executed, plus page-in events. Separate from `logs`, which
+    // holds only the PRINT output the attached-screen process-smi shows in the
+    // MO1 mockup's format. This is a pending buffer: the scheduler appends it
+    // to the file and clears it, so a long run does not grow it without bound.
+    std::vector<std::string> trace;
+
     uint32_t memorySize;
     std::map<std::string, uint16_t> symbolTable; // name -> offset in the symbol segment
 
@@ -143,8 +150,9 @@ public:
     std::string getViolationAddressHex() const;
 
     // Attempt one instruction. Called only while the process holds a CPU, so
-    // faults can only ever occur on a worker (spec).
-    ExecResult advance(IProcessMemory& mem);
+    // faults can only ever occur on a worker (spec). `tick` is the current CPU
+    // tick, recorded in the trace.
+    ExecResult advance(IProcessMemory& mem, uint64_t tick);
 
 private:
     const Instruction* getCurrentInstruction() const;
@@ -153,8 +161,11 @@ private:
 
     // Bring in everything the instruction touches before running any of it, so
     // execution itself cannot fault half-way through.
-    ExecResult ensureResident(const Instruction& instr, IProcessMemory& mem);
-    void executeInstruction(const Instruction& instr, IProcessMemory& mem);
+    ExecResult ensureResident(const Instruction& instr, IProcessMemory& mem, uint64_t tick);
+    void executeInstruction(const Instruction& instr, IProcessMemory& mem, uint64_t tick);
+
+    // Append one "[timestamp] [tick N] (Core C) text" line to the trace.
+    void traceLine(uint64_t tick, const std::string& text);
 
     // Symbol table. resolveVariable returns false only when the table is full
     // and the name is new - the caller then silently ignores the access.

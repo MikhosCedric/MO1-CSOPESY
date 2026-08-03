@@ -64,6 +64,23 @@ std::string Process::getViolationAddressHex() const {
     return oss.str();
 }
 
+static std::string hexAddr(uint32_t addr) {
+    std::ostringstream oss;
+    oss << "0x" << std::uppercase << std::hex << addr;
+    return oss.str();
+}
+
+void Process::traceLine(uint64_t tick, const std::string& text) {
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    std::ostringstream oss;
+    oss << "[" << std::put_time(std::localtime(&t), "%m/%d/%Y %I:%M:%S%p") << "]"
+        << " [tick " << tick << "]"
+        << " (Core " << attachedCore << ") "
+        << text;
+    trace.push_back(oss.str());
+}
+
 bool Process::resolveVariable(const std::string& name, uint32_t& offset) {
     auto it = symbolTable.find(name);
     if (it != symbolTable.end()) {
@@ -174,7 +191,7 @@ static bool touchesSymbolTable(const Instruction& instr) {
     }
 }
 
-ExecResult Process::ensureResident(const Instruction& instr, IProcessMemory& mem) {
+ExecResult Process::ensureResident(const Instruction& instr, IProcessMemory& mem, uint64_t tick) {
     mem.beginInstruction(id, static_cast<uint32_t>(currentLine));
 
     bool faulted = false;
@@ -199,10 +216,11 @@ ExecResult Process::ensureResident(const Instruction& instr, IProcessMemory& mem
         if (r == Residency::FAULTED) faulted = true;
     }
 
+    if (faulted) traceLine(tick, "Process paged into memory.");
     return faulted ? ExecResult::PAGE_FAULT : ExecResult::COMPLETED;
 }
 
-ExecResult Process::advance(IProcessMemory& mem) {
+ExecResult Process::advance(IProcessMemory& mem, uint64_t tick) {
     if (isFinished()) return ExecResult::COMPLETED;
 
     const Instruction* instr = getCurrentInstruction();
@@ -221,6 +239,8 @@ ExecResult Process::advance(IProcessMemory& mem) {
 
     if (instr->opcode == Opcode::SLEEP) {
         sleepRemaining = static_cast<int>(instr->val1);
+        traceLine(tick, "sleep(" + std::to_string(instr->val1) + ") until tick "
+                        + std::to_string(tick + instr->val1));
         advanceLine();
         return ExecResult::COMPLETED;
     }
@@ -228,10 +248,10 @@ ExecResult Process::advance(IProcessMemory& mem) {
     // Neither a fault nor a violation consumes the line: on PAGE_FAULT the
     // allocator has serviced the fault and this same instruction is retried on
     // the next tick, and on VIOLATION the process is already dead.
-    ExecResult ready = ensureResident(*instr, mem);
+    ExecResult ready = ensureResident(*instr, mem, tick);
     if (ready != ExecResult::COMPLETED) return ready;
 
-    executeInstruction(*instr, mem);
+    executeInstruction(*instr, mem, tick);
     advanceLine();
 
     if (currentLine >= instructions.size() && forStack.empty()) {
@@ -243,7 +263,7 @@ ExecResult Process::advance(IProcessMemory& mem) {
 
 // Runs one instruction. ensureResident() has already guaranteed every page this
 // touches is present, so nothing here can fault or violate.
-void Process::executeInstruction(const Instruction& instr, IProcessMemory& mem) {
+void Process::executeInstruction(const Instruction& instr, IProcessMemory& mem, uint64_t tick) {
     switch (instr.opcode) {
     case Opcode::PRINT: {
         std::string base = (instr.arg1.empty() && !instr.literalSet)
@@ -258,31 +278,43 @@ void Process::executeInstruction(const Instruction& instr, IProcessMemory& mem) 
         oss << "(" << std::put_time(std::localtime(&t), "%m/%d/%Y %I:%M:%S%p") << ") "
             << "Core:" << attachedCore << " \"" << base << "\"";
         logs.push_back(oss.str());
+        traceLine(tick, base);
         return;
     }
     case Opcode::DECLARE: {
         writeVariable(instr.arg1, instr.val1, mem);
+        traceLine(tick, "Declared variable " + instr.arg1 + " = "
+                        + std::to_string(instr.val1));
         return;
     }
     case Opcode::ADD: {
         uint16_t v2 = instr.arg2.empty() ? instr.val2 : readVariable(instr.arg2, mem);
         uint16_t v3 = instr.arg3.empty() ? instr.val3 : readVariable(instr.arg3, mem);
-        writeVariable(instr.arg1, clampUint16(static_cast<int64_t>(v2) + v3), mem);
+        const uint16_t sum = clampUint16(static_cast<int64_t>(v2) + v3);
+        writeVariable(instr.arg1, sum, mem);
+        traceLine(tick, "Added " + instr.arg1 + " = " + std::to_string(sum));
         return;
     }
     case Opcode::SUBTRACT: {
         uint16_t v2 = instr.arg2.empty() ? instr.val2 : readVariable(instr.arg2, mem);
         uint16_t v3 = instr.arg3.empty() ? instr.val3 : readVariable(instr.arg3, mem);
-        writeVariable(instr.arg1, clampUint16(static_cast<int64_t>(v2) - v3), mem);
+        const uint16_t diff = clampUint16(static_cast<int64_t>(v2) - v3);
+        writeVariable(instr.arg1, diff, mem);
+        traceLine(tick, "Subtracted " + instr.arg1 + " = " + std::to_string(diff));
         return;
     }
     case Opcode::READ: {
-        writeVariable(instr.arg1, mem.readWord(id, instr.addr), mem);
+        const uint16_t value = mem.readWord(id, instr.addr);
+        writeVariable(instr.arg1, value, mem);
+        traceLine(tick, "read " + hexAddr(instr.addr) + " " + instr.arg1
+                        + " -> read " + std::to_string(value)
+                        + " from " + hexAddr(instr.addr));
         return;
     }
     case Opcode::WRITE: {
         uint16_t value = instr.arg1.empty() ? instr.val1 : readVariable(instr.arg1, mem);
         mem.writeWord(id, instr.addr, value);
+        traceLine(tick, "wrote " + std::to_string(value) + " to " + hexAddr(instr.addr));
         return;
     }
     default:

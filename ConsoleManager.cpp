@@ -201,6 +201,21 @@ static bool parseMemorySize(const std::string& token, uint64_t& out) {
     return ConfigManager::isValidMemSize(out);
 }
 
+// The spec writes its screen -c examples shell-escaped - PRINT(\"Result: \" +
+// varC) - and a grader copies that line verbatim. Typed as-is the backslash
+// stops the literal from looking like a quoted string, so it is parsed as a
+// variable name and the text is silently dropped. Unescape \" before parsing,
+// which leaves the unescaped form untouched.
+static std::string unescapeQuotes(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '\\' && i + 1 < s.size() && s[i + 1] == '"') continue;
+        out += s[i];
+    }
+    return out;
+}
+
 void ConsoleManager::handleScreen(const std::string& input) {
     std::istringstream iss(input);
     std::string cmd, flag, name, sizeToken;
@@ -246,8 +261,9 @@ void ConsoleManager::handleScreen(const std::string& input) {
                 std::cout << "invalid command" << std::endl;
                 return;
             }
-            if (!Process::parseInstructions(input.substr(open + 1, close - open - 1),
-                                            instructions)
+            const std::string body =
+                unescapeQuotes(input.substr(open + 1, close - open - 1));
+            if (!Process::parseInstructions(body, instructions)
                 || instructions.empty() || instructions.size() > 50) {
                 std::cout << "invalid command" << std::endl;
                 return;
@@ -350,10 +366,15 @@ std::string ConsoleManager::buildUtilReport() {
 
     oss << "\nFinished processes:" << std::endl;
     for (auto* p : scheduler->getFinishedProcesses()) {
+        // A process killed by an access violation did not finish: report it as
+        // terminated, at the line it died on, so this agrees with the violation
+        // message screen -r prints instead of claiming it ran to completion.
+        const bool killed = p->isTerminated();
         oss << std::left << std::setw(12) << p->name
             << " (" << p->getTimestamp() << ")"
-            << "   Finished  "
-            << std::right << std::setw(5) << p->totalLines
+            << "   " << std::left << std::setw(10)
+            << (killed ? "Terminated" : "Finished")
+            << std::right << std::setw(5) << (killed ? p->currentLine : p->totalLines)
             << " / " << std::left << p->totalLines << std::endl;
     }
     oss << "----------------------------------------" << std::endl;
@@ -408,15 +429,19 @@ void ConsoleManager::handleProcessSMI() {
     std::cout << "| PROCESS-SMI V01.00 Driver Version: 01.00 |" << std::endl;
     std::cout << "--------------------------------------------------" << std::endl;
     std::cout << "CPU-Util: " << cpuUtil << "%" << std::endl;
-    std::cout << "Memory Usage: " << usedMem << "B / " << totalMem << "B" << std::endl;
+    // The spec's p.4 mockup labels these MiB, so the display follows it. The
+    // figures stay the raw byte counts from config.txt - every quiz config is
+    // under 1 MiB, so converting would print 0 for all of them and case 3 could
+    // not show the 32768 it expects.
+    std::cout << "Memory Usage: " << usedMem << "MiB / " << totalMem << "MiB" << std::endl;
     std::cout << "Memory Util: " << memUtil << "%" << std::endl;
     std::cout << std::endl;
     std::cout << "==================================================" << std::endl;
     std::cout << "Running processes and memory usage:" << std::endl;
     std::cout << "--------------------------------------------------" << std::endl;
 
-    for (auto* p : scheduler->getRunningProcesses()) {
-        std::cout << p->name << " " << scheduler->getResidentMemory(p->id) << "B" << std::endl;
+    for (auto* p : scheduler->getMemoryProcesses()) {
+        std::cout << p->name << " " << scheduler->getResidentMemory(p->id) << "MiB" << std::endl;
     }
 
     std::cout << "--------------------------------------------------" << std::endl;

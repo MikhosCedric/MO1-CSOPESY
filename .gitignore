@@ -375,6 +375,12 @@ memory_stamp_*.txt
 # Demand-paging swap area (generated at runtime)
 csopesy-backing-store.txt
 
+# Per-process execution traces (generated at runtime)
+/proc-logs/
+
+# Local working logbook - untracked on purpose (removed from the repo in 02685e5)
+progress.md
+
 classSpecs.txt
 specs.txt
 num5.txt

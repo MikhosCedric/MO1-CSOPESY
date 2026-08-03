@@ -15,22 +15,23 @@
 // file the spec requires - csopesy-backing-store.txt - which is readable at any
 // point during a run.
 //
-// A record carries the process info the notes call for (id, name, memory size,
-// page count, and the command counter - the current instruction line, which is
-// what makes a swapped-out process resumable) plus every page of that process
-// currently swapped out, and that page's bytes.
+// The file is an append-only EVENT LOG: one line per page movement, in the
+// format the course sample shows -
 //
-// The authoritative state is in memory and the file is a rendering of it, for
-// two reasons:
+//   Process 2 page 1 paged in to backing store at Tue Aug  5 22:09:05 2025
+//   Process 2 page 1 evicted to backing store at Tue Aug  5 22:09:06 2025
+//
+// The pages themselves live in memory and the file records what happened to
+// them, for two reasons:
 //   * Correctness is unaffected - page-in reads the same bytes either way, and
 //     it drops per-page file I/O from the fault path entirely.
-//   * Rewriting the file inside each individual page-out is quadratic. A
-//     20-second batch run holds ~10,000 swapped-out pages across ~200 live
-//     processes, so a rewrite per byte-array write means tens of millions of
-//     lines and the emulator grinds to a halt.
-// A mutation marks the store dirty and flushIfDirty() rewrites the file. The
-// scheduler calls it once per tick, so the file is at most one tick behind and
-// the destructor writes a final time on shutdown.
+//   * Re-rendering the whole store inside each individual page-out is
+//     quadratic. A 20-second batch run holds ~10,000 swapped-out pages across
+//     ~200 live processes, so a rewrite per byte-array write means tens of
+//     millions of lines and the emulator grinds to a halt.
+// Events are buffered and flushIfDirty() appends them. The scheduler calls it
+// once per tick, so the log is at most one tick behind and the destructor
+// appends a final time on shutdown.
 // ============================================================================
 class BackingStore {
 public:
@@ -53,10 +54,10 @@ public:
     // Pages currently swapped out, across every process.
     size_t getPageCount() const { return pages.size(); }
 
-    // Rewrite the file if anything has changed since the last rewrite.
+    // Append any events recorded since the last call.
     void flushIfDirty();
 
-    // Drop everything and truncate the file (startup / reset).
+    // Drop everything and truncate the log (startup / reset).
     void clear();
 
 private:
@@ -67,13 +68,15 @@ private:
         uint32_t commandCounter = 0;
     };
 
-    void writeFile() const;
+    // "Process <pid> page <vpn> <what> to backing store at <timestamp>"
+    void logEvent(uint32_t pid, uint32_t vpn, const char* what);
+    void appendEvents();
 
     std::string path;
     std::map<uint32_t, Record> procs;                                   // pid -> info
     std::map<std::pair<uint32_t, uint32_t>, std::vector<uint8_t>> pages; // (pid, vpn) -> bytes
 
-    bool dirty = false;
+    std::vector<std::string> pendingEvents; // written by the next appendEvents()
 };
 
 #endif // BACKING_STORE_H

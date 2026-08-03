@@ -2,6 +2,7 @@
 #include <vector>
 #include <memory>
 #include <map>
+#include <deque>
 #include <utility>
 #include "Process.h"
 #include "ConfigManager.h"
@@ -20,6 +21,12 @@ public:
     std::vector<Process*> getRunningProcesses() const;
     std::vector<Process*> getReadyProcesses() const;
     std::vector<Process*> getAllProcesses() const;
+
+    // The rows process-smi lists: every process currently holding frames, plus
+    // anything on a core (a thrashing process can hold none). Their resident
+    // sizes sum to getUsedMemory(), which listing only on-core processes did
+    // not - a sleeping process keeps its frames but leaves its core.
+    std::vector<Process*> getMemoryProcesses() const;
 
     uint32_t getCoresUsed() const;
     uint32_t getCoresTotal() const;
@@ -47,6 +54,13 @@ public:
 private:
     void generateMemorySnapshot(uint64_t tick);
 
+    // Append pending per-process trace lines to proc-logs/proc<id>.txt. Run
+    // every PROC_LOG_FLUSH_TICKS rather than every tick: one append per active
+    // process per second keeps the files near-live without opening a file per
+    // core on every tick.
+    void flushProcessLogs();
+    static constexpr uint64_t PROC_LOG_FLUSH_TICKS = 20;
+
     Config config;
     uint32_t quantum;
 
@@ -63,5 +77,10 @@ private:
 
     uint64_t idleTicks = 0;
     uint64_t activeTicks = 0;
-    uint32_t coresBusyLastTick = 0;
+
+    // Busy-core count for each of the last UTIL_WINDOW_TICKS ticks, averaged by
+    // getCoresUsed(). One second at the 50 ms tick - long enough to smooth out
+    // paging bursts, short enough to still track what the cores are doing.
+    static constexpr size_t UTIL_WINDOW_TICKS = 20;
+    std::deque<uint32_t> busyHistory;
 };

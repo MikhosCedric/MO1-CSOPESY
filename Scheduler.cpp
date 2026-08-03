@@ -7,6 +7,7 @@
 #include <ctime>
 #include <random>
 #include <direct.h>
+#include <filesystem>
 
 // Roll a per-process memory size from [min-mem-per-proc, max-mem-per-proc].
 // Every memory size in the spec is a power of two, so the interval is sampled
@@ -30,6 +31,11 @@ Scheduler::Scheduler(const Config& config)
 {
     cores.resize(config.numCpu, nullptr);
     coreTickCounters.resize(config.numCpu, 0);
+
+    // Start from a clean set of trace files each run - they are appended to, so
+    // leftovers from the previous run would run on into this one's.
+    std::error_code ec;
+    std::filesystem::remove_all("proc-logs", ec);
 }
 
 void Scheduler::onTick(uint64_t tick) {
@@ -82,7 +88,7 @@ void Scheduler::onTick(uint64_t tick) {
             // tick against it means that with a small quantum a process is
             // preempted on the very tick it faulted and never reaches its
             // retry, so under memory pressure it would never run at all.
-            const ExecResult result = proc->advance(memory);
+            const ExecResult result = proc->advance(memory, tick);
             if (result == ExecResult::COMPLETED && config.scheduler == "rr") {
                 cpuQuantumCounter[proc->id]++;
             }
@@ -120,16 +126,24 @@ void Scheduler::onTick(uint64_t tick) {
 
     // Phase 2b: Tick accounting. Every core-tick lands in exactly one bucket,
     // so idle + active == total still holds.
-    coresBusyLastTick = 0;
+    uint32_t busyThisTick = 0;
     for (size_t i = 0; i < cores.size(); i++) {
         if (busy[i]) {
             activeTicks++;
-            coresBusyLastTick++;
+            busyThisTick++;
         }
         else {
             idleTicks++;
         }
     }
+
+    // Utilisation is reported over a short window, not off this tick alone.
+    // Under paging a core executes in bursts, so a single tick samples either
+    // none or all of them and two consecutive screen -ls calls read 0% then
+    // 100% - which also prints "Cores used: 0" above a list of running
+    // processes. The window keeps the figure steady and truthful.
+    busyHistory.push_back(busyThisTick);
+    if (busyHistory.size() > UTIL_WINDOW_TICKS) busyHistory.pop_front();
 
     // Phase 3: Dispatch ready processes to idle cores.
     // Under demand paging every process already owns a page table (built at
@@ -159,6 +173,37 @@ void Scheduler::onTick(uint64_t tick) {
 
     // Keep csopesy-backing-store.txt current for anyone reading it mid-run.
     memory.flushBackingStore();
+
+    if (tick % PROC_LOG_FLUSH_TICKS == 0) {
+        flushProcessLogs();
+    }
+}
+
+// Append each process's pending trace lines to proc-logs/proc<id>.txt and clear
+// the buffer, so memory stays flat however long a process runs. Only processes
+// that executed since the last flush do any I/O.
+void Scheduler::flushProcessLogs() {
+    bool madeDir = false;
+
+    for (auto& p : allProcs) {
+        if (p->trace.empty()) continue;
+
+        if (!madeDir) {
+            _mkdir("proc-logs");
+            madeDir = true;
+        }
+
+        std::ostringstream fname;
+        fname << "proc-logs/proc" << std::setw(2) << std::setfill('0') << p->id << ".txt";
+
+        std::ofstream file(fname.str(), std::ios::app);
+        if (!file.is_open()) continue;
+
+        for (const std::string& line : p->trace) {
+            file << line << "\n";
+        }
+        p->trace.clear();
+    }
 }
 
 void Scheduler::generateMemorySnapshot(uint64_t tick) {
@@ -217,6 +262,17 @@ std::vector<Process*> Scheduler::getRunningProcesses() const {
     return result;
 }
 
+std::vector<Process*> Scheduler::getMemoryProcesses() const {
+    std::vector<Process*> result;
+    for (auto& p : allProcs) {
+        if (p->isFinished()) continue;
+        if (p->state == ProcessState::RUNNING || memory.getResidentMemory(p->id) > 0) {
+            result.push_back(p.get());
+        }
+    }
+    return result;
+}
+
 std::vector<Process*> Scheduler::getReadyProcesses() const {
     return readyQueue;
 }
@@ -227,13 +283,21 @@ std::vector<Process*> Scheduler::getAllProcesses() const {
     return result;
 }
 
-// Cores that actually executed an instruction on the last tick, not cores that
-// merely hold a process. Under memory starvation a core can be occupied yet
-// stalled on page faults every tick, and reporting that as full utilisation
-// hides exactly what a memory demo is meant to show. With enough memory every
-// occupied core executes each tick, so this equals occupancy as before.
+// Cores that actually executed an instruction, averaged over the last
+// UTIL_WINDOW_TICKS ticks - not cores that merely hold a process. Under memory
+// starvation a core can be occupied yet stalled on page faults every tick, and
+// reporting that as full utilisation hides exactly what a memory demo is meant
+// to show. With enough memory every occupied core executes each tick, so this
+// equals occupancy as before.
 uint32_t Scheduler::getCoresUsed() const {
-    return coresBusyLastTick;
+    if (busyHistory.empty()) return 0;
+
+    uint64_t sum = 0;
+    for (uint32_t n : busyHistory) sum += n;
+
+    // Rounded, so a core busy for most of the window reads as one busy core
+    // rather than none.
+    return static_cast<uint32_t>((sum + busyHistory.size() / 2) / busyHistory.size());
 }
 
 uint32_t Scheduler::getCoresTotal() const {
