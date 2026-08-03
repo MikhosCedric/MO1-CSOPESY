@@ -675,7 +675,22 @@ static bool parseOne(const std::string& text, Instruction& out) {
 }
 
 bool Process::parseInstructions(const std::string& text, std::vector<Instruction>& out) {
-    return parseList(text, out);
+    // Mock-quiz commands render PRINT literals as \"text\".  The CLI receives
+    // those backslashes literally (getline does not perform shell unescaping),
+    // so normalize escaped quotes before applying the regular instruction
+    // grammar. Ordinary PRINT("text") input continues to work unchanged.
+    std::string normalized;
+    normalized.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\\' && i + 1 < text.size() && text[i + 1] == '"') {
+            normalized += '"';
+            ++i;
+        }
+        else {
+            normalized += text[i];
+        }
+    }
+    return parseList(normalized, out);
 }
 
 std::string Process::generateVariableName() {
