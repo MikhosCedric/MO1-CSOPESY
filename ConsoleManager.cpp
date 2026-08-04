@@ -232,15 +232,20 @@ void ConsoleManager::handleScreen(const std::string& input) {
         }
 
         // On screen -c the size is optional: the spec's own worked example and
-        // the mock quiz both write screen -c <name> "<instructions>". When it is
-        // omitted the process rolls a size the same way a batch process does.
+        // the mock quiz both write screen -c <name> "<instructions>".
         iss >> sizeToken;
         const bool sizeOmitted = (flag == "-c" && (sizeToken.empty() || sizeToken.front() == '"'));
 
         uint64_t memSize = 0;
         if (sizeOmitted) {
-            std::lock_guard<std::mutex> lock(schedulerMutex);
-            memSize = scheduler->rollProcessMemorySize();
+            // Give it the largest legal address space. min/max-mem-per-proc are
+            // defined by the spec as the roll for processes created by
+            // scheduler-start, not this, and sizing from them broke the spec's
+            // own worked example: p.6 walks through WRITE 0x500 in a process
+            // created exactly this way page-faulting and then succeeding, which
+            // a 256-byte space would instead reject as a violation. Demand
+            // paging means the space costs no frames until it is touched.
+            memSize = ConfigManager::MAX_MEM_SIZE;
         }
         else if (sizeToken.empty()) {
             std::cout << "Usage: screen -s <process_name> <process_memory_size>" << std::endl;
@@ -290,12 +295,13 @@ void ConsoleManager::handleScreen(const std::string& input) {
             scheduler->addProcess(std::move(proc));
         }
 
-        if (flag == "-c") {
-            // Stay on the main menu so the user can watch it run.
-            std::cout << "Process " << name << " created." << std::endl;
-            return;
-        }
-
+        // Both -s and -c attach to the new process's screen. MO1 defines this
+        // for screen -s ("the console will clear its contents and move to the
+        // process screen") and the spec says nothing either way about screen -c,
+        // so they behave alike. It also makes a short instruction list
+        // observable at all: a handful of instructions finishes in well under a
+        // second, and screen -r on a finished process must report "not found",
+        // so anyone not already attached can never see its output.
         screenMgr.attachToProcess(name);
         system("cls");
         std::cout << "Process " << name << " created. Switched to process screen." << std::endl;

@@ -318,6 +318,3 @@ Config Scheduler::getConfig() const {
     return config;
 }
 
-uint32_t Scheduler::rollProcessMemorySize() const {
-    return rollMemorySize(config.minMemPerProc, config.maxMemPerProc);
-}

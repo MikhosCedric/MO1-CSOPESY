@@ -33,6 +33,7 @@ Config ConfigManager::parse(const std::string& path) {
         std::string key;
         iss >> key;
         key = toLower(stripQuotes(key));
+        if (key.empty()) continue; // whitespace-only line
 
         std::string valStr;
         iss >> valStr;
@@ -56,7 +57,11 @@ Config ConfigManager::parse(const std::string& path) {
         else if (key == "max-ins") {
             config.maxIns = static_cast<uint32_t>(std::stoul(valStr));
         }
-        else if (key == "delay-per-exec") {
+        // The MO2 spec's parameter table writes this plural ("delays-per-exec")
+        // while every sample config writes it singular. Accept both: only
+        // config.txt may be edited during the quiz, and silently ignoring the
+        // key would leave the delay at 0 with nothing on screen to show it.
+        else if (key == "delay-per-exec" || key == "delays-per-exec") {
             config.delayPerExec = static_cast<uint32_t>(std::stoul(valStr));
         }
         else if (key == "max-overall-mem") {
@@ -71,13 +76,20 @@ Config ConfigManager::parse(const std::string& path) {
         else if (key == "max-mem-per-proc") {
             config.maxMemPerProc = static_cast<uint32_t>(std::stoul(valStr));
         }
+        else {
+            // Say so rather than ignoring it. A mistyped key would otherwise
+            // leave that parameter at its default and the run would look fine
+            // while behaving differently from what the config asked for.
+            std::cerr << "Warning: unrecognized config key '" << key
+                      << "' (ignored)" << std::endl;
+        }
     }
 
     return config;
 }
 
 bool ConfigManager::isValidMemSize(uint64_t value) {
-    if (value < 64 || value > 65536) return false;
+    if (value < MIN_MEM_SIZE || value > MAX_MEM_SIZE) return false;
     return (value & (value - 1)) == 0; // power of two
 }
 

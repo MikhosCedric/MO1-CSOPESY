@@ -4,8 +4,9 @@ A C++ command-line emulator of an operating system's process scheduler
 (FCFS / round-robin) combined with a **demand-paging memory manager** backed by a
 plain-text backing store.
 
-> `README.txt` is the same document in plain text — it is the copy submitted with
-> the SOURCE deliverable. Keep the two in sync if you edit either.
+> This file is the SOURCE deliverable's README. The spec accepts a GitHub link in
+> place of a `README.txt`, so this is the single copy — there is no separate
+> plain-text version to keep in sync.
 
 ## Authors
 
@@ -107,14 +108,20 @@ Usable with `screen -c`:
 
 Memory addresses use the `0x`-prefixed hexadecimal form, e.g. `0x500`.
 
-**Example** (single line; the inner quotes are *not* escaped):
+**Example** (single line):
 
 ```
 screen -c process2 2048 "DECLARE varA 10; DECLARE varB 5; ADD varA varA varB; WRITE 0x500 varA; READ varC 0x500; PRINT("Result: " + varC)"
 ```
 
-Prints `Result: 15`. View it with `screen -r process2` then `process-smi` while
-the process is still running.
+Prints `Result: 15`. The escaped form the spec prints its examples in works too —
+`PRINT(\"Result: \" + varC)` — so a line copied straight out of the spec or a
+quiz sheet can be pasted as-is.
+
+View the output with `screen -r process2` then `process-smi` **while the process
+is still running**. Once it finishes, `screen -r` correctly reports
+`Process process2 not found.` and the log is no longer reachable, so attach
+promptly or raise `delay-per-exec` to slow execution down.
 
 ## Behaviour notes
 
@@ -128,14 +135,40 @@ the process is still running.
   store marked invalid, and a frame is claimed only when a page fault occurs
   while the process is on a CPU core. When memory is full a FIFO victim page is
   evicted to the backing store and the faulting instruction is restarted.
-- **CPU utilization counts cores that are not stalled on a page fault.** Under
-  memory pressure an occupied core can fault every tick without executing an
-  instruction, so utilization drops below 100% — that is the intended signal.
+- `READ` and `WRITE` touch two pages — the symbol table segment for their
+  variable operand, and the page holding the target address — and make them
+  resident **one at a time**, resuming mid-instruction after a fault. Demanding
+  both at once would hang any configuration with a single frame, since neither
+  page can be brought in without evicting the other.
+- `screen -c` **without** a memory size (the form the spec's own examples use)
+  gives the process the largest legal address space, 65536 bytes. `min-mem-per-proc`
+  and `max-mem-per-proc` govern processes created by `scheduler-start`, not this
+  one. Demand paging means the space costs no frames until it is touched.
+- A process killed by an access violation is listed by `screen -ls` as
+  **`Terminated`** at the line it died on, not as `Finished`.
+- **`CPU utilization` and `Cores used` measure different things.** `Cores used`
+  is how many cores currently hold a process, so it always matches the list
+  printed beneath it. `CPU utilization` is the share of core-ticks that actually
+  executed an instruction, averaged over the last second. Under memory pressure
+  an occupied core can fault every tick without executing anything, so all cores
+  can read as used while utilization sits in single digits — that is the
+  intended signal, not a contradiction.
+- `process-smi` labels memory **MiB** to match the spec's mockup, but the figures
+  are the raw byte values from `config.txt`. Since every memory parameter is
+  capped at 65,536 bytes, converting to real MiB would display `0` everywhere.
 
 ## Files generated at runtime
 
-| File | Contents |
-|---|---|
-| `csopesy-backing-store.txt` | The backing store: every live process (id, name, memory size, page count, command counter) and its currently swapped-out pages. Readable at any time while running. |
-| `csopesy-log.txt` | Written by `report-util`. |
-| `log\memory_stamp_NN.txt` | Periodic snapshots of the frame table. |
+All are written to the working directory — the project root when launched from
+Visual Studio.
+
+| File | Contents | Cleared by `initialize` |
+|---|---|---|
+| `csopesy-backing-store.txt` | Append-only log of page movement, one line per event: `Process 2 page 1 evicted to backing store at Tue Aug 5 22:09:05 2025`. Readable at any time while running. | yes |
+| `proc-logs\proc<id>.txt` | Per-process execution trace — one line per instruction executed and per page-in, stamped with the CPU tick and core. | yes |
+| `log\memory_stamp_NN.txt` | Periodic snapshots of the frame table. Written only under the `rr` scheduler; `fcfs` produces none. | **no** — see below |
+| `csopesy-log.txt` | Written by `report-util`. | n/a (overwritten each time) |
+
+> `log\` is the one exception: snapshots are written per filename, so a short run
+> does not remove higher-numbered files left by a longer one. Delete the folder
+> between runs if you need its contents to belong to a single session.

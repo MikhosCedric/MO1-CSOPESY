@@ -145,6 +145,9 @@ void Process::pushForContext(const Instruction* forInst) {
 }
 
 void Process::advanceLine() {
+    // A new instruction always starts at phase 0.
+    instrPhase = 0;
+
     if (forStack.empty()) {
         currentLine++;
         if (currentLine >= instructions.size()) {
@@ -178,46 +181,107 @@ void Process::advanceLine() {
 }
 
 // Does this instruction read or write a variable, i.e. touch the symbol table
-// segment? The segment is a page like any other and can fault.
+// segment? The segment is a page like any other and can fault. READ and WRITE
+// are absent: they are phased separately below, because they also touch a data
+// page.
 static bool touchesSymbolTable(const Instruction& instr) {
     switch (instr.opcode) {
     case Opcode::PRINT:    return !instr.arg2.empty();
-    case Opcode::WRITE:    return !instr.arg1.empty();
     case Opcode::DECLARE:
     case Opcode::ADD:
-    case Opcode::SUBTRACT:
-    case Opcode::READ:     return true;
+    case Opcode::SUBTRACT: return true;
     default:               return false;
     }
 }
 
-ExecResult Process::ensureResident(const Instruction& instr, IProcessMemory& mem, uint64_t tick) {
-    mem.beginInstruction(id, static_cast<uint32_t>(currentLine));
+// A READ or a WRITE touches two different pages - the symbol table segment for
+// its variable operand, and the page holding the target address. They are made
+// resident ONE AT A TIME, in separate phases, so the instruction still
+// completes when physical memory holds a single frame. Demanding both at once
+// livelocks that configuration: neither page can be brought in without evicting
+// the other, so the instruction retries forever. This mirrors real hardware,
+// where an operand is loaded into a register before the store is issued.
+//
+// instrPhase survives a PAGE_FAULT, so a retry resumes where it stopped rather
+// than starting over. That is what guarantees forward progress - every attempt
+// either completes the instruction or advances it one phase.
+ExecResult Process::executeStep(const Instruction& instr, IProcessMemory& mem, uint64_t tick) {
+    // A fault brings a page in and costs the tick; the instruction resumes on
+    // the next one. UNAVAILABLE means no frame could be won at all - the
+    // allocator has already dropped this attempt's pins, so yield and retry.
+    const auto faulted = [&](Residency r) {
+        if (r == Residency::FAULTED) traceLine(tick, "Process paged into memory.");
+        return r != Residency::RESIDENT;
+    };
 
-    bool faulted = false;
-
-    if (touchesSymbolTable(instr)) {
-        // UNAVAILABLE means the allocator has already released this attempt's
-        // pins, so stop asking for pages and let another process run.
-        const Residency r = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
-        if (r == Residency::UNAVAILABLE) return ExecResult::PAGE_FAULT;
-        if (r == Residency::FAULTED) faulted = true;
-    }
-
-    if (instr.opcode == Opcode::READ || instr.opcode == Opcode::WRITE) {
-        // The bounds check precedes the fault: an address outside the process's
-        // own space is a violation, not a page that could be brought in.
+    switch (instr.opcode) {
+    case Opcode::READ:
+    case Opcode::WRITE:
+        // An address outside the process's own space is a violation, not a page
+        // that could be brought in - so this precedes all fault handling.
         if (!isValidAddress(instr.addr)) {
             raiseViolation(instr.addr);
             return ExecResult::VIOLATION;
         }
-        const Residency r = mem.ensureResident(id, instr.addr, 2);
-        if (r == Residency::UNAVAILABLE) return ExecResult::PAGE_FAULT;
-        if (r == Residency::FAULTED) faulted = true;
+        break;
+    default:
+        break;
     }
 
-    if (faulted) traceLine(tick, "Process paged into memory.");
-    return faulted ? ExecResult::PAGE_FAULT : ExecResult::COMPLETED;
+    switch (instr.opcode) {
+    case Opcode::READ: {
+        // Phase 0: load the word from its data page into phaseValue.
+        if (instrPhase == 0) {
+            const Residency r = mem.ensureResident(id, instr.addr, 2);
+            if (r == Residency::UNAVAILABLE) return ExecResult::PAGE_FAULT;
+            phaseValue = mem.readWord(id, instr.addr);
+            instrPhase = 1;
+            if (faulted(r)) return ExecResult::PAGE_FAULT;
+        }
+        // Phase 1: store it into the symbol table. The data page may have been
+        // evicted to make room - harmless, the value is already in phaseValue.
+        const Residency r = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+        if (r == Residency::UNAVAILABLE || faulted(r)) return ExecResult::PAGE_FAULT;
+
+        writeVariable(instr.arg1, phaseValue, mem);
+        traceLine(tick, "read " + hexAddr(instr.addr) + " " + instr.arg1
+                        + " -> read " + std::to_string(phaseValue)
+                        + " from " + hexAddr(instr.addr));
+        return ExecResult::COMPLETED;
+    }
+    case Opcode::WRITE: {
+        // Phase 0: fetch the operand. A literal needs no page at all.
+        if (instrPhase == 0) {
+            if (instr.arg1.empty()) {
+                phaseValue = instr.val1;
+                instrPhase = 1;
+            }
+            else {
+                const Residency r = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+                if (r == Residency::UNAVAILABLE) return ExecResult::PAGE_FAULT;
+                phaseValue = readVariable(instr.arg1, mem);
+                instrPhase = 1;
+                if (faulted(r)) return ExecResult::PAGE_FAULT;
+            }
+        }
+        // Phase 1: store to the target page.
+        const Residency r = mem.ensureResident(id, instr.addr, 2);
+        if (r == Residency::UNAVAILABLE || faulted(r)) return ExecResult::PAGE_FAULT;
+
+        mem.writeWord(id, instr.addr, phaseValue);
+        traceLine(tick, "wrote " + std::to_string(phaseValue) + " to " + hexAddr(instr.addr));
+        return ExecResult::COMPLETED;
+    }
+    default: {
+        // Everything else touches the symbol table segment or nothing at all.
+        if (touchesSymbolTable(instr)) {
+            const Residency r = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+            if (r == Residency::UNAVAILABLE || faulted(r)) return ExecResult::PAGE_FAULT;
+        }
+        executeSimple(instr, mem, tick);
+        return ExecResult::COMPLETED;
+    }
+    }
 }
 
 ExecResult Process::advance(IProcessMemory& mem, uint64_t tick) {
@@ -245,13 +309,14 @@ ExecResult Process::advance(IProcessMemory& mem, uint64_t tick) {
         return ExecResult::COMPLETED;
     }
 
-    // Neither a fault nor a violation consumes the line: on PAGE_FAULT the
-    // allocator has serviced the fault and this same instruction is retried on
-    // the next tick, and on VIOLATION the process is already dead.
-    ExecResult ready = ensureResident(*instr, mem, tick);
-    if (ready != ExecResult::COMPLETED) return ready;
+    mem.beginInstruction(id, static_cast<uint32_t>(currentLine));
 
-    executeInstruction(*instr, mem, tick);
+    // Neither a fault nor a violation consumes the line: on PAGE_FAULT the
+    // instruction resumes from its current phase on the next tick, and on
+    // VIOLATION the process is already dead.
+    const ExecResult result = executeStep(*instr, mem, tick);
+    if (result != ExecResult::COMPLETED) return result;
+
     advanceLine();
 
     if (currentLine >= instructions.size() && forStack.empty()) {
@@ -261,9 +326,9 @@ ExecResult Process::advance(IProcessMemory& mem, uint64_t tick) {
     return ExecResult::COMPLETED;
 }
 
-// Runs one instruction. ensureResident() has already guaranteed every page this
-// touches is present, so nothing here can fault or violate.
-void Process::executeInstruction(const Instruction& instr, IProcessMemory& mem, uint64_t tick) {
+// Runs an instruction that needs at most the symbol table segment, which
+// executeStep() has already made resident - so nothing here can fault.
+void Process::executeSimple(const Instruction& instr, IProcessMemory& mem, uint64_t tick) {
     switch (instr.opcode) {
     case Opcode::PRINT: {
         std::string base = (instr.arg1.empty() && !instr.literalSet)
@@ -303,22 +368,8 @@ void Process::executeInstruction(const Instruction& instr, IProcessMemory& mem, 
         traceLine(tick, "Subtracted " + instr.arg1 + " = " + std::to_string(diff));
         return;
     }
-    case Opcode::READ: {
-        const uint16_t value = mem.readWord(id, instr.addr);
-        writeVariable(instr.arg1, value, mem);
-        traceLine(tick, "read " + hexAddr(instr.addr) + " " + instr.arg1
-                        + " -> read " + std::to_string(value)
-                        + " from " + hexAddr(instr.addr));
-        return;
-    }
-    case Opcode::WRITE: {
-        uint16_t value = instr.arg1.empty() ? instr.val1 : readVariable(instr.arg1, mem);
-        mem.writeWord(id, instr.addr, value);
-        traceLine(tick, "wrote " + std::to_string(value) + " to " + hexAddr(instr.addr));
-        return;
-    }
     default:
-        return;
+        return; // READ and WRITE are phased in executeStep()
     }
 }
 

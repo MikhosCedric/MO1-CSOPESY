@@ -129,6 +129,13 @@ public:
     int sleepRemaining;
     std::vector<ForContext> forStack;
 
+    // Where a READ or a WRITE has got to. Those two touch two different pages
+    // and make them resident one at a time, so a page fault can land mid
+    // instruction; the phase survives the retry and the instruction resumes
+    // rather than starting over. See executeStep() in Process.cpp.
+    int instrPhase = 0;
+    uint16_t phaseValue = 0; // operand fetched, or word loaded, in phase 0
+
     Process(const std::string& name, uint32_t minIns, uint32_t maxIns, uint32_t memorySize);
 
     // screen -c: a process running a user-supplied instruction list.
@@ -159,10 +166,12 @@ private:
     void pushForContext(const Instruction* forInst);
     void advanceLine();
 
-    // Bring in everything the instruction touches before running any of it, so
-    // execution itself cannot fault half-way through.
-    ExecResult ensureResident(const Instruction& instr, IProcessMemory& mem, uint64_t tick);
-    void executeInstruction(const Instruction& instr, IProcessMemory& mem, uint64_t tick);
+    // Attempt the current instruction, making the pages it needs resident one
+    // at a time so a single frame is always enough to finish it.
+    ExecResult executeStep(const Instruction& instr, IProcessMemory& mem, uint64_t tick);
+
+    // Run an instruction whose pages executeStep() has already made resident.
+    void executeSimple(const Instruction& instr, IProcessMemory& mem, uint64_t tick);
 
     // Append one "[timestamp] [tick N] (Core C) text" line to the trace.
     void traceLine(uint64_t tick, const std::string& text);

@@ -23,6 +23,10 @@ public:
     static Config parse(const std::string& path);
     static bool validate(const Config& config);
 
+    // Bounds of the spec's memory range, [2^6, 2^16].
+    static constexpr uint32_t MIN_MEM_SIZE = 64;
+    static constexpr uint32_t MAX_MEM_SIZE = 65536;
+
     // Every memory size in MO2 is a power of two in [2^6, 2^16] = [64, 65536].
     // Shared by config validation and by screen -s / screen -c, so the two can
     // never drift apart. Takes uint64_t so an oversized literal typed at the
