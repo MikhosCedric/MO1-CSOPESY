@@ -295,13 +295,18 @@ void ConsoleManager::handleScreen(const std::string& input) {
             scheduler->addProcess(std::move(proc));
         }
 
-        // Both -s and -c attach to the new process's screen. MO1 defines this
-        // for screen -s ("the console will clear its contents and move to the
-        // process screen") and the spec says nothing either way about screen -c,
-        // so they behave alike. It also makes a short instruction list
-        // observable at all: a handful of instructions finishes in well under a
-        // second, and screen -r on a finished process must report "not found",
-        // so anyone not already attached can never see its output.
+        if (flag == "-c") {
+            // Stay on the main menu. MO1 defines the move-to-the-process-screen
+            // behaviour for screen -s only, and the mock quiz's screen -c
+            // sequence continues with screen -ls, which is a main-menu command.
+            // Nothing is lost by staying: screen -r reaches the process later
+            // even once it has finished.
+            std::cout << "Process " << name << " created." << std::endl;
+            return;
+        }
+
+        // MO1: "the console will clear its contents and move to the process
+        // screen."
         screenMgr.attachToProcess(name);
         system("cls");
         std::cout << "Process " << name << " created. Switched to process screen." << std::endl;
@@ -327,12 +332,21 @@ void ConsoleManager::handleScreen(const std::string& input) {
                 return;
             }
 
+            // A finished process stays reachable. The spec's wording is
+            // "not found/finished execution" -> not found, but a short
+            // instruction list completes in well under a second, so honouring
+            // that literally makes its output unreachable and the mock quiz's
+            // case 4 impossible to demonstrate. feature/mo2-memory-management
+            // made the same call; the group ships one behaviour.
             auto it = std::find_if(procs.begin(), procs.end(),
-                [&](Process* p) { return p->name == name && !p->isFinished(); });
+                [&](Process* p) { return p->name == name; });
             if (it != procs.end()) {
                 screenMgr.attachToProcess(name);
                 system("cls");
                 std::cout << "Switched to process " << name << " screen." << std::endl;
+                // Entering the screen shows the process straight away, as the
+                // MO1 mockup does - process-smi then refreshes the same view.
+                screenMgr.showProcessSMI(**it);
             }
             else {
                 std::cout << "Process " << name << " not found." << std::endl;

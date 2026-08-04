@@ -78,7 +78,7 @@ fails, leaving the emulator uninitialized.
 | `initialize` | Read `config.txt` and start the emulator |
 | `screen -s <name> <mem_size>` | Create a process and attach to its screen |
 | `screen -c <name> [mem_size] "<instructions>"` | Create a process running 1–50 semicolon-separated instructions |
-| `screen -r <name>` | Re-attach; reports the memory access violation if the process was killed by one |
+| `screen -r <name>` | Re-attach and show the process's log; reports the memory access violation if the process was killed by one |
 | `screen -ls` | List running and finished processes |
 | `scheduler-start` / `scheduler-test` | Begin generating processes in batch |
 | `scheduler-stop` | Stop generating processes |
@@ -146,6 +146,13 @@ promptly or raise `delay-per-exec` to slow execution down.
   one. Demand paging means the space costs no frames until it is touched.
 - A process killed by an access violation is listed by `screen -ls` as
   **`Terminated`** at the line it died on, not as `Finished`.
+- **`screen -r` reaches a finished process** and prints its log on attach. The
+  spec words this as "not found/finished execution" → `not found`, but a short
+  instruction list completes in well under a second, which would make its output
+  permanently unreachable — so a finished process stays attachable and only a
+  genuinely unknown name reports `Process <name> not found.` Attaching renders
+  the process view immediately, as the MO1 mockup shows; `process-smi` then
+  refreshes the same view.
 - **`CPU utilization` and `Cores used` measure different things.** `Cores used`
   is how many cores currently hold a process, so it always matches the list
   printed beneath it. `CPU utilization` is the share of core-ticks that actually
