@@ -26,6 +26,7 @@ private:
     void handleVmstat();
     void handleReportUtil();
     std::string buildUtilReport();
+    void clearAttachedProcessOutput();
 
     void backgroundTickLoop();
 

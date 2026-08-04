@@ -249,6 +249,7 @@ void ConsoleManager::run() {
                     [&](Process* p) { return p->name == cur; });
                 if (it != procs.end() && (*it)->accessViolation) {
                     std::cout << (*it)->getAccessViolationMessage() << std::endl;
+                    (*it)->setScreenAttached(false);
                     screenMgr.detach();
                     std::cout << "Returned to main menu." << std::endl;
                     detached = true;
@@ -266,10 +267,15 @@ void ConsoleManager::run() {
                     }
                     else {
                         std::cout << "Process not found." << std::endl;
+                        clearAttachedProcessOutput();
                         screenMgr.detach();
                     }
                 }
                 else if (input == "exit") {
+                    {
+                        std::lock_guard<std::mutex> lock(schedulerMutex);
+                        clearAttachedProcessOutput();
+                    }
                     screenMgr.detach();
                     std::cout << "Returned to main menu." << std::endl;
                 }
@@ -520,10 +526,15 @@ void ConsoleManager::handleScreen(const std::string& input) {
                 std::cout << (*it)->getAccessViolationMessage() << std::endl;
                 return;
             }
-            if (it != procs.end() && !(*it)->isFinished()) {
+            if (it != procs.end()) {
+                clearAttachedProcessOutput();
+                (*it)->setScreenAttached(true);
                 screenMgr.attachToProcess(name);
                 system("cls");
                 std::cout << "Switched to process " << name << " screen." << std::endl;
+                for (const auto& log : (*it)->logs) {
+                    std::cout << log << std::endl;
+                }
             }
             else {
                 std::cout << "Process " << name << " not found." << std::endl;
@@ -624,6 +635,17 @@ void ConsoleManager::handleVmstat() {
     std::cout << "total cpu ticks: " << scheduler->getTotalCpuTicks() << std::endl;
     std::cout << "pages paged in: " << mem.getPagesPagedIn() << std::endl;
     std::cout << "pages paged out: " << mem.getPagesPagedOut() << std::endl;
+}
+
+void ConsoleManager::clearAttachedProcessOutput() {
+    auto cur = screenMgr.getCurrentProcessName();
+    if (cur.empty() || !scheduler) return;
+    auto procs = scheduler->getAllProcesses();
+    auto it = std::find_if(procs.begin(), procs.end(),
+        [&](Process* p) { return p->name == cur; });
+    if (it != procs.end()) {
+        (*it)->setScreenAttached(false);
+    }
 }
 
 void ConsoleManager::handleReportUtil() {

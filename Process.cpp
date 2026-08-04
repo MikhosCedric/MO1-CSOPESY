@@ -28,6 +28,7 @@ Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns,
     , lastOpPageFaulted(false)
     , accessViolation(false)
     , violationAddress(0)
+    , printActive(false)
     , memory(memory)
 {
     auto now = std::chrono::system_clock::now();
@@ -58,6 +59,7 @@ Process::Process(const std::string& name, uint32_t memorySize, MemoryManager* me
     , lastOpPageFaulted(false)
     , accessViolation(false)
     , violationAddress(0)
+    , printActive(false)
     , memory(memory)
     , instructions(instructions)
 {
@@ -76,6 +78,10 @@ Process::Process(const std::string& name, uint32_t memorySize, MemoryManager* me
 
 bool Process::isFinished() const {
     return state == ProcessState::FINISHED || state == ProcessState::TERMINATED;
+}
+
+void Process::setScreenAttached(bool active) {
+    printActive = active;
 }
 
 std::string Process::getTimestamp() const {
@@ -194,7 +200,9 @@ bool Process::executeInstruction(const Instruction& instr) {
         oss << "(" << std::put_time(std::localtime(&t), "%m/%d/%Y %I:%M:%S%p") << ") "
             << "Core:" << attachedCore << " \"" << base << "\"";
         logs.push_back(oss.str());
-        std::cout << oss.str() << std::endl;
+        if (printActive) {
+            std::cout << oss.str() << std::endl;
+        }
         return true;
     }
     case Opcode::DECLARE: {

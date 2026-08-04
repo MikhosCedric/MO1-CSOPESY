@@ -58,6 +58,7 @@ public:
     bool accessViolation;
     uint32_t violationAddress;
     std::string violationTime;
+    bool printActive;
 
     Process(const std::string& name, uint32_t minIns, uint32_t maxIns,
         uint32_t memorySize, MemoryManager* memory);
@@ -69,6 +70,7 @@ public:
     std::string getCoreString() const;
     bool advance();
     std::string getAccessViolationMessage() const;
+    void setScreenAttached(bool active);
 
 private:
     MemoryManager* memory;
