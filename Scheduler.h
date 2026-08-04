@@ -11,7 +11,11 @@
 class Scheduler {
 public:
     Scheduler(const Config& config);
-    ~Scheduler() = default;
+
+    // Writes out whatever trace lines the last partial flush interval left
+    // pending, so a session that ends seconds after a process ran still has
+    // that process's proc-logs file.
+    ~Scheduler();
 
     void onTick(uint64_t tick);
     void addProcess(std::unique_ptr<Process> proc);

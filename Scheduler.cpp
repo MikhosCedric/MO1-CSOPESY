@@ -38,6 +38,10 @@ Scheduler::Scheduler(const Config& config)
     std::filesystem::remove_all("proc-logs", ec);
 }
 
+Scheduler::~Scheduler() {
+    flushProcessLogs();
+}
+
 void Scheduler::onTick(uint64_t tick) {
     // Which cores did useful work this tick. A core is idle when it holds no
     // process, or when its process spent the tick stalled on a page fault - the
