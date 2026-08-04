@@ -29,7 +29,7 @@ Process::Process(const std::string& name, uint32_t minIns, uint32_t maxIns, uint
     oss << std::put_time(std::localtime(&t), "%Y-%m-%d %H:%M:%S");
     creationTime = oss.str();
 
-    instructions = generateInstructions(minIns, maxIns, memorySize, 0);
+    instructions = generateInstructions(minIns, maxIns, memorySize);
     totalLines = instructions.size();
 }
 
@@ -380,21 +380,16 @@ void Process::executeSimple(const Instruction& instr, IProcessMemory& mem, uint6
 }
 
 std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t maxIns,
-                                                       uint32_t memorySize, uint32_t depth) {
+                                                       uint32_t memorySize) {
     std::vector<Instruction> result;
     std::uniform_int_distribution<uint32_t> countDist(minIns, maxIns);
-    std::uniform_int_distribution<int> typeDist(0, 9);
+    // Automatically generated processes must stay within their configured
+    // instruction budget. Control-flow instructions are still accepted by
+    // screen -c, but generating FOR or SLEEP here makes a nominal 30-45 line
+    // process run for an unbounded number of scheduler ticks.
+    std::uniform_int_distribution<int> typeDist(0, 7);
     std::uniform_int_distribution<uint16_t> valDist(0, UINT16_MAX);
-    // SLEEP takes a uint8, but generating the full [0, 255] range leaves a
-    // process asleep for up to ~13 seconds at a 20 Hz tick. With sleeps landing
-    // every ~50 instructions that put processes to sleep for roughly three
-    // quarters of their wall time, which starves the cores, suppresses the page
-    // faults a memory demo is meant to show, and stops short processes from
-    // finishing. A shorter roll still exercises SLEEP without dominating.
-    std::uniform_int_distribution<int> sleepDist(0, 20);
-    std::uniform_int_distribution<int> repeatDist(2, 3);
     std::uniform_int_distribution<int> concatDist(0, 2);
-    std::uniform_int_distribution<int> rareDist(0, 4);
 
     // Generated READ/WRITE addresses stay inside the user-addressable space and
     // 2-byte aligned, so batch processes exercise paging without dying on a
@@ -411,22 +406,7 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
         Instruction instr;
         int type = typeDist(rng());
 
-        // Nesting is capped at two levels, with 2-3 repeats. A FOR multiplies
-        // the work behind one line of code, and those multipliers compound with
-        // depth: at three levels with 2-5 repeats a "100 instruction" process
-        // executes ~40 instructions per line and runs for minutes, so nothing
-        // ever reaches the finished list. Two levels keeps loops (and nested
-        // loops) on show while a short process stays short.
-        if (type >= 8 && depth < 2) {
-            instr.opcode = Opcode::FOR;
-            instr.val1 = static_cast<uint16_t>(repeatDist(rng()));
-            uint32_t bodyMin = 1;
-            uint32_t bodyMax = 3;
-            instr.body = generateInstructions(bodyMin, bodyMax, memorySize, depth + 1);
-        }
-        else {
-            int subType = type % 8; // type is 0..7 here; 6 and 7 are READ/WRITE
-            switch (subType) {
+        switch (type) {
             case 0:
             case 1:
                 instr.opcode = Opcode::PRINT;
@@ -453,13 +433,7 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
                 instr.val3 = valDist(rng());
                 break;
             case 5:
-                if (rareDist(rng()) == 0) {
-                    instr.opcode = Opcode::SLEEP;
-                    instr.val1 = static_cast<uint16_t>(sleepDist(rng()));
-                }
-                else {
-                    instr.opcode = Opcode::PRINT;
-                }
+                instr.opcode = Opcode::PRINT;
                 break;
             case 6:
                 if (canAddress) {
@@ -481,7 +455,6 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
                     instr.opcode = Opcode::PRINT;
                 }
                 break;
-            }
         }
 
         result.push_back(instr);

@@ -187,7 +187,7 @@ private:
     void raiseViolation(uint32_t addr);
 
     static std::vector<Instruction> generateInstructions(uint32_t minIns, uint32_t maxIns,
-                                                        uint32_t memorySize, uint32_t depth);
+                                                        uint32_t memorySize);
     static std::string generateVariableName();
     static uint16_t clampUint16(int64_t value);
 };

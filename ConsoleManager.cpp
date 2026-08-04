@@ -487,7 +487,17 @@ void ConsoleManager::backgroundTickLoop() {
 
         if (scheduler) {
             std::lock_guard<std::mutex> lock(schedulerMutex);
-            if (batchRunning && cpuCycles % scheduler->getConfig().batchProcessFreq == 0) {
+            const Config config = scheduler->getConfig();
+            // batch-process-freq is measured in instruction opportunities. If
+            // an instruction is attempted only every X raw ticks, arrivals must
+            // use that same clock or delay-per-exec would multiply service time
+            // without multiplying the interval between processes.
+            const uint64_t executionPeriod = config.delayPerExec > 0
+                ? static_cast<uint64_t>(config.delayPerExec)
+                : 1ULL;
+            const uint64_t batchPeriod =
+                static_cast<uint64_t>(config.batchProcessFreq) * executionPeriod;
+            if (batchRunning && cpuCycles % batchPeriod == 0) {
                 scheduler->generateBatchProcess();
             }
 
