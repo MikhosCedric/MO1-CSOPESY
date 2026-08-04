@@ -2,7 +2,6 @@
 #include <vector>
 #include <memory>
 #include <map>
-#include <deque>
 #include <utility>
 #include "Process.h"
 #include "ConfigManager.h"
@@ -37,10 +36,8 @@ public:
     uint32_t getCoresUsed() const;
     uint32_t getCoresTotal() const;
 
-    // Percentage of core-ticks that executed an instruction, over the last
-    // UTIL_WINDOW_TICKS ticks. Deliberately NOT coresUsed/coresTotal: a core
-    // can hold a process yet stall on a page fault every tick, and reporting
-    // that as full utilisation hides what a memory demo is meant to show.
+    // Instantaneous occupied-core percentage. This is the utilization shown by
+    // screen-ls/process-smi and agrees with the running-process snapshot.
     uint32_t getCpuUtilization() const;
     Config getConfig() const;
 
@@ -86,9 +83,4 @@ private:
     uint64_t idleTicks = 0;
     uint64_t activeTicks = 0;
 
-    // Busy-core count for each of the last UTIL_WINDOW_TICKS ticks, averaged by
-    // getCoresUsed(). One second at the 50 ms tick - long enough to smooth out
-    // paging bursts, short enough to still track what the cores are doing.
-    static constexpr size_t UTIL_WINDOW_TICKS = 20;
-    std::deque<uint32_t> busyHistory;
 };

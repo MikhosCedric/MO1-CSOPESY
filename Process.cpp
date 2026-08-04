@@ -87,12 +87,18 @@ bool Process::resolveVariable(const std::string& name, uint32_t& offset) {
         offset = it->second;
         return true;
     }
-    // Symbol table full: the declaration is silently ignored (spec).
-    if (symbolTable.size() >= MAX_VARIABLES) return false;
+    // Small processes have fewer variable slots: each uint16 must fit entirely
+    // inside the process's own address space.
+    const uint32_t capacity = std::min<uint32_t>(MAX_VARIABLES, memorySize / 2);
+    if (symbolTable.size() >= capacity) return false;
 
     offset = static_cast<uint32_t>(symbolTable.size()) * 2;
     symbolTable[name] = static_cast<uint16_t>(offset);
     return true;
+}
+
+uint32_t Process::getSymbolTableBytes() const {
+    return std::min<uint32_t>(SYMBOL_TABLE_BYTES, memorySize);
 }
 
 uint16_t Process::readVariable(const std::string& name, IProcessMemory& mem) {
@@ -240,7 +246,7 @@ ExecResult Process::executeStep(const Instruction& instr, IProcessMemory& mem, u
         }
         // Phase 1: store it into the symbol table. The data page may have been
         // evicted to make room - harmless, the value is already in phaseValue.
-        const Residency r = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+        const Residency r = mem.ensureResident(id, 0, getSymbolTableBytes());
         if (r == Residency::UNAVAILABLE || faulted(r)) return ExecResult::PAGE_FAULT;
 
         writeVariable(instr.arg1, phaseValue, mem);
@@ -257,7 +263,7 @@ ExecResult Process::executeStep(const Instruction& instr, IProcessMemory& mem, u
                 instrPhase = 1;
             }
             else {
-                const Residency r = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+                const Residency r = mem.ensureResident(id, 0, getSymbolTableBytes());
                 if (r == Residency::UNAVAILABLE) return ExecResult::PAGE_FAULT;
                 phaseValue = readVariable(instr.arg1, mem);
                 instrPhase = 1;
@@ -275,7 +281,7 @@ ExecResult Process::executeStep(const Instruction& instr, IProcessMemory& mem, u
     default: {
         // Everything else touches the symbol table segment or nothing at all.
         if (touchesSymbolTable(instr)) {
-            const Residency r = mem.ensureResident(id, 0, SYMBOL_TABLE_BYTES);
+            const Residency r = mem.ensureResident(id, 0, getSymbolTableBytes());
             if (r == Residency::UNAVAILABLE || faulted(r)) return ExecResult::PAGE_FAULT;
         }
         executeSimple(instr, mem, tick);
@@ -393,10 +399,11 @@ std::vector<Instruction> Process::generateInstructions(uint32_t minIns, uint32_t
     // Generated READ/WRITE addresses stay inside the user-addressable space and
     // 2-byte aligned, so batch processes exercise paging without dying on a
     // violation. A process with no room above the symbol table gets none.
-    const bool canAddress = memorySize >= SYMBOL_TABLE_BYTES + 2;
-    std::uniform_int_distribution<uint32_t> wordDist(SYMBOL_TABLE_BYTES / 2,
+    const uint32_t symbolBytes = std::min<uint32_t>(SYMBOL_TABLE_BYTES, memorySize);
+    const bool canAddress = memorySize >= symbolBytes + 2;
+    std::uniform_int_distribution<uint32_t> wordDist(symbolBytes / 2,
                                                      canAddress ? (memorySize - 2) / 2
-                                                                : SYMBOL_TABLE_BYTES / 2);
+                                                                : symbolBytes / 2);
 
     uint32_t count = countDist(rng());
 

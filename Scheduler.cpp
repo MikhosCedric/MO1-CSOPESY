@@ -141,14 +141,6 @@ void Scheduler::onTick(uint64_t tick) {
         }
     }
 
-    // Utilisation is reported over a short window, not off this tick alone.
-    // Under paging a core executes in bursts, so a single tick samples either
-    // none or all of them and two consecutive screen -ls calls read 0% then
-    // 100% - which also prints "Cores used: 0" above a list of running
-    // processes. The window keeps the figure steady and truthful.
-    busyHistory.push_back(busyThisTick);
-    if (busyHistory.size() > UTIL_WINDOW_TICKS) busyHistory.pop_front();
-
     // Phase 3: Dispatch ready processes to idle cores.
     // Under demand paging every process already owns a page table (built at
     // creation, all pages invalid), so dispatch never has to wait for memory -
@@ -297,17 +289,11 @@ uint32_t Scheduler::getCoresUsed() const {
     return used;
 }
 
-// Share of core-ticks that actually executed, across the window. A core that
-// holds a process but faults every tick contributes nothing here, which is why
-// case 3 reads a few percent with all its cores occupied.
+// Utilization is the instantaneous share of cores occupied by live processes.
+// Page faults do not make an occupied CPU disappear from screen-ls/process-smi.
 uint32_t Scheduler::getCpuUtilization() const {
-    if (busyHistory.empty() || cores.empty()) return 0;
-
-    uint64_t busy = 0;
-    for (uint32_t n : busyHistory) busy += n;
-
-    const uint64_t capacity = static_cast<uint64_t>(busyHistory.size()) * cores.size();
-    return static_cast<uint32_t>((busy * 100 + capacity / 2) / capacity);
+    if (cores.empty()) return 0;
+    return getCoresUsed() * 100 / static_cast<uint32_t>(cores.size());
 }
 
 uint32_t Scheduler::getCoresTotal() const {

@@ -84,10 +84,10 @@ public:
 // A process owns memorySize bytes of its own virtual space, laid out as two
 // segments:
 //
-//   [0, 64)            symbol table segment - 32 slots of 2 bytes
-//   [64, memorySize)   user-addressable space
+//   [0, min(64, size)) symbol table segment - up to 32 slots of 2 bytes
+//   [64, memorySize)   user-addressable space when memorySize exceeds 64
 //
-// Declarations past the 32nd are silently ignored (spec). READ/WRITE are
+// Declarations past the available slots are silently ignored. READ/WRITE are
 // bounds-checked against the whole space, so a user address below 64 is legal
 // and aliases the symbol table - the spec only defines an out-of-space
 // reference as a violation.
@@ -181,6 +181,7 @@ private:
     bool resolveVariable(const std::string& name, uint32_t& offset);
     uint16_t readVariable(const std::string& name, IProcessMemory& mem);
     void writeVariable(const std::string& name, uint16_t value, IProcessMemory& mem);
+    uint32_t getSymbolTableBytes() const;
 
     bool isValidAddress(uint32_t addr) const;
     void raiseViolation(uint32_t addr);

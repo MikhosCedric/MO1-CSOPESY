@@ -189,7 +189,7 @@ void ConsoleManager::processMainCommand(const std::string& input) {
 }
 
 // A process memory size as typed at the prompt. Anything that is not a plain
-// number, or is outside the spec's [2^6, 2^16] powers of two, is rejected the
+// number, or is outside the supported [2^3, 2^16] powers of two, is rejected the
 // same way - the console only ever reports "invalid memory allocation".
 static bool parseMemorySize(const std::string& token, uint64_t& out) {
     if (token.empty()) return false;

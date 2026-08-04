@@ -52,7 +52,7 @@ x64\Debug\MO1.exe
 ## Configuration (`config.txt`)
 
 Read by `initialize`, space-separated. **All memory values must be a power of two
-within [64, 65536] bytes.**
+within [8, 65536] bytes.**
 
 | Parameter | Meaning | Range |
 |---|---|---|

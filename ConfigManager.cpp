@@ -115,19 +115,19 @@ bool ConfigManager::validate(const Config& config) {
         return false;
     }
     if (!isValidMemSize(config.maxOverallMem)) {
-        std::cerr << "Error: max-overall-mem must be a power of two in [64, 65536]" << std::endl;
+        std::cerr << "Error: max-overall-mem must be a power of two in [8, 65536]" << std::endl;
         return false;
     }
     if (!isValidMemSize(config.memPerFrame)) {
-        std::cerr << "Error: mem-per-frame must be a power of two in [64, 65536]" << std::endl;
+        std::cerr << "Error: mem-per-frame must be a power of two in [8, 65536]" << std::endl;
         return false;
     }
     if (!isValidMemSize(config.minMemPerProc)) {
-        std::cerr << "Error: min-mem-per-proc must be a power of two in [64, 65536]" << std::endl;
+        std::cerr << "Error: min-mem-per-proc must be a power of two in [8, 65536]" << std::endl;
         return false;
     }
     if (!isValidMemSize(config.maxMemPerProc)) {
-        std::cerr << "Error: max-mem-per-proc must be a power of two in [64, 65536]" << std::endl;
+        std::cerr << "Error: max-mem-per-proc must be a power of two in [8, 65536]" << std::endl;
         return false;
     }
     if (config.maxOverallMem % config.memPerFrame != 0) {
