@@ -4,9 +4,11 @@ A C++ command-line emulator of an operating system's process scheduler
 (FCFS / round-robin) combined with a **demand-paging memory manager** backed by a
 plain-text backing store.
 
-> This file is the SOURCE deliverable's README. The spec accepts a GitHub link in
-> place of a `README.txt`, so this is the single copy — there is no separate
-> plain-text version to keep in sync.
+> `README.txt` is the plain-text copy submitted with the SOURCE deliverable. It
+> covers only the authors, the entry class file, and how to build, run and
+> configure the program. This file adds the design detail behind it — the
+> command reference, instruction set, and behaviour notes. Update `README.txt`
+> too if you change anything about building or running.
 
 ## Authors
 
