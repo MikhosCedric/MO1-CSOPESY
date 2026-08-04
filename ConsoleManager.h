@@ -38,6 +38,7 @@ private:
     std::thread tickThread;
 
     std::atomic<uint64_t> cpuCycles{0};
+    uint64_t lastBatchGenerationTick = 0; // protected by schedulerMutex
     bool schedulerStarted;
     bool initialized;
 };

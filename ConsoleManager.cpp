@@ -163,7 +163,17 @@ void ConsoleManager::processMainCommand(const std::string& input) {
             return;
         }
         schedulerStarted = true;
-        batchRunning = true;
+        {
+            std::lock_guard<std::mutex> lock(schedulerMutex);
+            // Start with work already dispatched so the first screen-ls
+            // snapshot shows the active scenario instead of an artificial
+            // full-frequency wait at 0%.
+            const uint64_t startTick = ++cpuCycles;
+            scheduler->generateBatchProcess();
+            lastBatchGenerationTick = startTick;
+            scheduler->onTick(startTick);
+            batchRunning = true;
+        }
         std::cout << "Scheduler started." << std::endl;
     }
     else if (input == "scheduler-stop") {
@@ -483,10 +493,10 @@ void ConsoleManager::handleVmstat() {
 void ConsoleManager::backgroundTickLoop() {
     while (running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        cpuCycles++;
 
         if (scheduler) {
             std::lock_guard<std::mutex> lock(schedulerMutex);
+            const uint64_t currentTick = ++cpuCycles;
             const Config config = scheduler->getConfig();
             // batch-process-freq is measured in instruction opportunities. If
             // an instruction is attempted only every X raw ticks, arrivals must
@@ -497,11 +507,16 @@ void ConsoleManager::backgroundTickLoop() {
                 : 1ULL;
             const uint64_t batchPeriod =
                 static_cast<uint64_t>(config.batchProcessFreq) * executionPeriod;
-            if (batchRunning && cpuCycles % batchPeriod == 0) {
+            if (batchRunning
+                && currentTick - lastBatchGenerationTick >= batchPeriod) {
                 scheduler->generateBatchProcess();
+                lastBatchGenerationTick = currentTick;
             }
 
-            scheduler->onTick(cpuCycles);
+            scheduler->onTick(currentTick);
+        }
+        else {
+            ++cpuCycles;
         }
     }
 }
