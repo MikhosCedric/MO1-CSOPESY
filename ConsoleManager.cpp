@@ -255,7 +255,17 @@ void ConsoleManager::handleScreen(const std::string& input) {
             // created exactly this way page-faulting and then succeeding, which
             // a 256-byte space would instead reject as a violation. Demand
             // paging means the space costs no frames until it is touched.
+            //
+            // Capped at max-overall-mem, though: a process whose address space
+            // is larger than physical memory is never dispatched (see the
+            // scheduler's admission control), so an uncapped default would
+            // silently refuse to run under a small max-overall-mem.
             memSize = ConfigManager::MAX_MEM_SIZE;
+            {
+                std::lock_guard<std::mutex> lock(schedulerMutex);
+                const uint64_t physical = scheduler ? scheduler->getTotalMemory() : 0;
+                if (physical > 0 && physical < memSize) memSize = physical;
+            }
         }
         else if (sizeToken.empty()) {
             std::cout << "Usage: screen -s <process_name> <process_memory_size>" << std::endl;

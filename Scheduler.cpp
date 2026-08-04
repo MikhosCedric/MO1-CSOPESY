@@ -149,8 +149,18 @@ void Scheduler::onTick(uint64_t tick) {
         if (cores[i] != nullptr) continue;
         if (readyQueue.empty()) break;
 
-        Process* candidate = readyQueue.front();
-        readyQueue.erase(readyQueue.begin());
+        // Admission control. Demand paging lets a process run without all of
+        // its pages resident, but a process whose whole address space is larger
+        // than physical memory can never hold the working set an instruction
+        // needs, so it is never dispatched: it stays queued and the system
+        // stalls at 0% utilisation. That is the case a config with
+        // min/max-mem-per-proc above max-overall-mem is asking to demonstrate.
+        auto it = std::find_if(readyQueue.begin(), readyQueue.end(),
+            [&](Process* p) { return p->memorySize <= memory.getTotalMemory(); });
+        if (it == readyQueue.end()) break;
+
+        Process* candidate = *it;
+        readyQueue.erase(it);
 
         cores[i] = candidate;
         candidate->state = ProcessState::RUNNING;
