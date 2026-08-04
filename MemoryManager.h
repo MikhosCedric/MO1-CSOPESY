@@ -38,6 +38,7 @@ public:
     void setProcessRunning(uint32_t pid, bool running);
 
     uint32_t getTotalMemory() const;
+    uint32_t getProcessMemory(uint32_t pid) const;
     uint32_t getUsedMemory() const;
     uint32_t getActiveMemory() const;
     uint32_t getInactiveMemory() const;

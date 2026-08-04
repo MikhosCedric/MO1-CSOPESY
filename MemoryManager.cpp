@@ -112,6 +112,16 @@ uint32_t MemoryManager::getTotalMemory() const {
     return maxOverallMem;
 }
 
+uint32_t MemoryManager::getProcessMemory(uint32_t pid) const {
+    auto it = processes.find(pid);
+    if (it == processes.end()) return 0;
+    uint32_t resident = 0;
+    for (const auto& pte : it->second.pageTable) {
+        if (pte.valid) resident += memPerFrame;
+    }
+    return resident;
+}
+
 uint32_t MemoryManager::getUsedMemory() const {
     uint32_t used = 0;
     for (uint32_t f = 0; f < numFrames; f++) {

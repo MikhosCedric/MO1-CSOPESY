@@ -611,12 +611,12 @@ void ConsoleManager::handleProcessSmi() {
     uint32_t memUtil = totalMem > 0 ? static_cast<uint32_t>(usedMem * 100 / totalMem) : 0;
 
     std::cout << "CPU-Util: " << cpuUtil << "%" << std::endl;
-    std::cout << "Memory Usage: " << usedMem << "MiB / " << totalMem << "MiB" << std::endl;
+    std::cout << "Memory Usage: " << usedMem << "KB / " << totalMem << "KB" << std::endl;
     std::cout << "Memory Util: " << memUtil << "%" << std::endl;
     std::cout << "\nRunning processes:" << std::endl;
     for (auto* p : scheduler->getRunningProcesses()) {
         std::cout << std::left << std::setw(16) << p->name
-            << std::right << std::setw(6) << p->memorySize << "MiB" << std::endl;
+            << std::right << std::setw(6) << mem.getProcessMemory(p->id) << "KB" << std::endl;
     }
 }
 
