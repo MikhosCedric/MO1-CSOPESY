@@ -347,7 +347,7 @@ std::string ConsoleManager::buildUtilReport() {
     uint32_t coresUsed = scheduler->getCoresUsed();
     uint32_t coresTotal = scheduler->getCoresTotal();
     uint32_t coresAvail = coresTotal - coresUsed;
-    uint32_t cpuUtil = coresTotal > 0 ? (coresUsed * 100 / coresTotal) : 0;
+    uint32_t cpuUtil = scheduler->getCpuUtilization();
 
     std::ostringstream oss;
     oss << "CPU utilization: " << cpuUtil << "%" << std::endl;
@@ -417,9 +417,7 @@ void ConsoleManager::handleProcessSMI() {
     std::lock_guard<std::mutex> lock(schedulerMutex);
     if (!scheduler) return;
 
-    uint32_t coresUsed = scheduler->getCoresUsed();
-    uint32_t coresTotal = scheduler->getCoresTotal();
-    uint32_t cpuUtil = coresTotal > 0 ? (coresUsed * 100 / coresTotal) : 0;
+    uint32_t cpuUtil = scheduler->getCpuUtilization();
 
     uint32_t usedMem = scheduler->getUsedMemory();
     uint32_t totalMem = scheduler->getTotalMemory();

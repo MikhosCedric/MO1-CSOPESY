@@ -287,21 +287,27 @@ std::vector<Process*> Scheduler::getAllProcesses() const {
     return result;
 }
 
-// Cores that actually executed an instruction, averaged over the last
-// UTIL_WINDOW_TICKS ticks - not cores that merely hold a process. Under memory
-// starvation a core can be occupied yet stalled on page faults every tick, and
-// reporting that as full utilisation hides exactly what a memory demo is meant
-// to show. With enough memory every occupied core executes each tick, so this
-// equals occupancy as before.
+// Occupancy, counted the same way getRunningProcesses() builds its list, so
+// "Cores used" can never disagree with the processes printed under it.
 uint32_t Scheduler::getCoresUsed() const {
-    if (busyHistory.empty()) return 0;
+    uint32_t used = 0;
+    for (auto* p : cores) {
+        if (p && !p->isFinished()) used++;
+    }
+    return used;
+}
 
-    uint64_t sum = 0;
-    for (uint32_t n : busyHistory) sum += n;
+// Share of core-ticks that actually executed, across the window. A core that
+// holds a process but faults every tick contributes nothing here, which is why
+// case 3 reads a few percent with all its cores occupied.
+uint32_t Scheduler::getCpuUtilization() const {
+    if (busyHistory.empty() || cores.empty()) return 0;
 
-    // Rounded, so a core busy for most of the window reads as one busy core
-    // rather than none.
-    return static_cast<uint32_t>((sum + busyHistory.size() / 2) / busyHistory.size());
+    uint64_t busy = 0;
+    for (uint32_t n : busyHistory) busy += n;
+
+    const uint64_t capacity = static_cast<uint64_t>(busyHistory.size()) * cores.size();
+    return static_cast<uint32_t>((busy * 100 + capacity / 2) / capacity);
 }
 
 uint32_t Scheduler::getCoresTotal() const {

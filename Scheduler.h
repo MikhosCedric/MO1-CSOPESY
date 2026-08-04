@@ -32,8 +32,16 @@ public:
     // not - a sleeping process keeps its frames but leaves its core.
     std::vector<Process*> getMemoryProcesses() const;
 
+    // Cores currently holding a process. Instantaneous, so it always agrees
+    // with getRunningProcesses() printed directly beneath it in screen -ls.
     uint32_t getCoresUsed() const;
     uint32_t getCoresTotal() const;
+
+    // Percentage of core-ticks that executed an instruction, over the last
+    // UTIL_WINDOW_TICKS ticks. Deliberately NOT coresUsed/coresTotal: a core
+    // can hold a process yet stall on a page fault every tick, and reporting
+    // that as full utilisation hides what a memory demo is meant to show.
+    uint32_t getCpuUtilization() const;
     Config getConfig() const;
 
     // Roll a size from [min-mem-per-proc, max-mem-per-proc], as a batch process
